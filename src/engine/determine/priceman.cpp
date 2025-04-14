@@ -10,7 +10,6 @@
 #include <iomanip>
 #include <immintrin.h>
 
-
 #include "../../alo/aloengine.h"
 #include "../../alo/aloscheme.h"    
 
