@@ -9,6 +9,7 @@
 #include <ctime>
 #include <iomanip>
 #include <mutex>
+#include <unistd.h>  // For close() function
 
 namespace engine {
 namespace determine {
@@ -168,4 +169,4 @@ void SharedMemoryManager::updateAllHeartbeats() {
 }
 
 } 
-} 
+}

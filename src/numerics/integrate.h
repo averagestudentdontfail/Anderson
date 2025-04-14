@@ -1,13 +1,15 @@
 #ifndef INTEGRATE_H
 #define INTEGRATE_H
 
-#include "integrate.h"
+#include "integrator.h"
 #include "../common/simd/simdops.h"
 #include "../common/simd/vectmth.h"
 #include <immintrin.h>
 #include <vector>
 #include <memory>
 #include <functional>
+#include <stdexcept>
+#include <cmath>
 
 namespace numerics {
 
@@ -287,4 +289,4 @@ std::shared_ptr<Integrator> createSimdIntegrator(
 
 } // namespace numerics
 
-#endif 
+#endif // INTEGRATE_H

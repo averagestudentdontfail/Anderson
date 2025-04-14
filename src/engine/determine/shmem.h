@@ -180,9 +180,8 @@ public:
 
 private:
     int shmId_;
-    SharedBlock* sharedBlock_;
-    key_t key_;
     bool isCreator_;
+    SharedBlock* sharedBlock_;
     std::string keyFile_;
     
     /**
@@ -239,4 +238,4 @@ private:
 } 
 } 
 
-#endif 
+#endif

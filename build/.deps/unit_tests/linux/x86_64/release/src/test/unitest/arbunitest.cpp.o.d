@@ -1,10 +1,4 @@
 {
-    depfiles_format = "gcc",
-    files = {
-        "src/test/unitest/arbunitest.cpp"
-    },
-    depfiles = "arbunitest.o: src/test/unitest/arbunitest.cpp\
-",
     values = {
         "/usr/bin/gcc",
         {
@@ -24,5 +18,11 @@
             "-fno-omit-frame-pointer",
             "-fno-math-errno"
         }
-    }
+    },
+    files = {
+        "src/test/unitest/arbunitest.cpp"
+    },
+    depfiles_format = "gcc",
+    depfiles = "arbunitest.o: src/test/unitest/arbunitest.cpp\
+"
 }

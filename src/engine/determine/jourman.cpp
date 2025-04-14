@@ -388,19 +388,8 @@ void JournalReplayEngine::replayThreadFunc() {
     
     Event event;
     uint64_t lastTimestamp = 0;
-    
-    // Using replayStartTime for properly handling real-time replay
-    auto replayStartTime = std::chrono::high_resolution_clock::now();
-    uint64_t journalStartTimestamp = 0;
-    bool isFirstEvent = true;
-    
+
     while (replaying_.load() && journal_->readNextEvent(event)) {
-        // Capture the first event timestamp as the journal start time
-        if (isFirstEvent) {
-            journalStartTimestamp = event.timestamp;
-            isFirstEvent = false;
-        }
-        
         // Calculate delay between events
         if (lastTimestamp > 0 && speedFactor_ > 0.0) {
             uint64_t delay = event.timestamp - lastTimestamp;
