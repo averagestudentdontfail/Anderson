@@ -2,7 +2,6 @@
     files = {
         "src/engine/system/latmon.cpp"
     },
-    depfiles_format = "gcc",
     values = {
         "/usr/bin/gcc",
         {
@@ -23,6 +22,7 @@
             "-fno-math-errno"
         }
     },
+    depfiles_format = "gcc",
     depfiles = "latmon.o: src/engine/system/latmon.cpp src/engine/system/latmon.h\
 "
 }

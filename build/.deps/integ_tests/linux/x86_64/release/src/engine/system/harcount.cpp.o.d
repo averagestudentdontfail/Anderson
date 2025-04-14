@@ -1,7 +1,7 @@
 {
-    depfiles = "harcount.o: src/engine/system/harcount.cpp src/engine/system/harcount.h\
-",
-    depfiles_format = "gcc",
+    files = {
+        "src/engine/system/harcount.cpp"
+    },
     values = {
         "/usr/bin/gcc",
         {
@@ -22,7 +22,7 @@
             "-fno-math-errno"
         }
     },
-    files = {
-        "src/engine/system/harcount.cpp"
-    }
+    depfiles_format = "gcc",
+    depfiles = "harcount.o: src/engine/system/harcount.cpp src/engine/system/harcount.h\
+"
 }

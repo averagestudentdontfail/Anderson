@@ -1,7 +1,7 @@
 {
-    depfiles = "shmem.o: src/engine/determine/shmem.cpp src/engine/determine/shmem.h\
-",
-    depfiles_format = "gcc",
+    files = {
+        "src/engine/determine/shmem.cpp"
+    },
     values = {
         "/usr/bin/gcc",
         {
@@ -22,7 +22,7 @@
             "-fno-math-errno"
         }
     },
-    files = {
-        "src/engine/determine/shmem.cpp"
-    }
+    depfiles_format = "gcc",
+    depfiles = "shmem.o: src/engine/determine/shmem.cpp src/engine/determine/shmem.h\
+"
 }

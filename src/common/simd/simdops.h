@@ -118,7 +118,6 @@ public:
     // Normal CDF approximation
     static inline __m256d normalCDF(__m256d x) {
         __m256d half = set1(0.5);
-        __m256d one = set1(1.0);
         __m256d sqrt2inv = set1(1.0 / std::sqrt(2.0));
         
         // normalCDF(x) = 0.5 * (1 + erf(x / sqrt(2)))
@@ -217,4 +216,4 @@ public:
 
 } 
 
-#endif 
+#endif

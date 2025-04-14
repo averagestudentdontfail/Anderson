@@ -2,7 +2,6 @@
     files = {
         "src/engine/determine/manmem.cpp"
     },
-    depfiles_format = "gcc",
     values = {
         "/usr/bin/gcc",
         {
@@ -23,6 +22,7 @@
             "-fno-math-errno"
         }
     },
+    depfiles_format = "gcc",
     depfiles = "manmem.o: src/engine/determine/manmem.cpp src/engine/determine/manmem.h\
 "
 }

@@ -2,7 +2,6 @@
     files = {
         "src/test/perfortest/aloperf.cpp"
     },
-    depfiles_format = "gcc",
     values = {
         "/usr/bin/gcc",
         {
@@ -23,6 +22,7 @@
             "-fno-math-errno"
         }
     },
+    depfiles_format = "gcc",
     depfiles = "aloperf.o: src/test/perfortest/aloperf.cpp\
 "
 }

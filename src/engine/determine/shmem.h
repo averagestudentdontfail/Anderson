@@ -180,6 +180,7 @@ public:
 
 private:
     int shmId_;
+    key_t key_;  // Added key_ member
     bool isCreator_;
     SharedBlock* sharedBlock_;
     std::string keyFile_;

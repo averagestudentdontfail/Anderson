@@ -1,7 +1,7 @@
 {
-    depfiles = "intesys.o: src/test/integtest/intesys.cpp\
-",
-    depfiles_format = "gcc",
+    files = {
+        "src/test/integtest/intesys.cpp"
+    },
     values = {
         "/usr/bin/gcc",
         {
@@ -22,7 +22,7 @@
             "-fno-math-errno"
         }
     },
-    files = {
-        "src/test/integtest/intesys.cpp"
-    }
+    depfiles_format = "gcc",
+    depfiles = "intesys.o: src/test/integtest/intesys.cpp\
+"
 }

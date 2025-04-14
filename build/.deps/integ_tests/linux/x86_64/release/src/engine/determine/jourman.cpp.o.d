@@ -1,7 +1,7 @@
 {
-    depfiles = "jourman.o: src/engine/determine/jourman.cpp  src/engine/determine/jourman.h src/engine/determine/shmem.h\
-",
-    depfiles_format = "gcc",
+    files = {
+        "src/engine/determine/jourman.cpp"
+    },
     values = {
         "/usr/bin/gcc",
         {
@@ -22,7 +22,7 @@
             "-fno-math-errno"
         }
     },
-    files = {
-        "src/engine/determine/jourman.cpp"
-    }
+    depfiles_format = "gcc",
+    depfiles = "jourman.o: src/engine/determine/jourman.cpp  src/engine/determine/jourman.h src/engine/determine/shmem.h\
+"
 }

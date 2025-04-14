@@ -1,7 +1,7 @@
 {
-    depfiles = "latmon.o: src/engine/system/latmon.cpp src/engine/system/latmon.h\
-",
-    depfiles_format = "gcc",
+    files = {
+        "src/engine/system/latmon.cpp"
+    },
     values = {
         "/usr/bin/gcc",
         {
@@ -22,7 +22,7 @@
             "-fno-math-errno"
         }
     },
-    files = {
-        "src/engine/system/latmon.cpp"
-    }
+    depfiles_format = "gcc",
+    depfiles = "latmon.o: src/engine/system/latmon.cpp src/engine/system/latmon.h\
+"
 }
