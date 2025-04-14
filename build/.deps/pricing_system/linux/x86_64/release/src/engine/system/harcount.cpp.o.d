@@ -2,9 +2,6 @@
     files = {
         "src/engine/system/harcount.cpp"
     },
-    depfiles_format = "gcc",
-    depfiles = "harcount.o: src/engine/system/harcount.cpp src/engine/system/harcount.h\
-",
     values = {
         "/usr/bin/gcc",
         {
@@ -24,5 +21,8 @@
             "-fno-omit-frame-pointer",
             "-fno-math-errno"
         }
-    }
+    },
+    depfiles_format = "gcc",
+    depfiles = "harcount.o: src/engine/system/harcount.cpp src/engine/system/harcount.h\
+"
 }

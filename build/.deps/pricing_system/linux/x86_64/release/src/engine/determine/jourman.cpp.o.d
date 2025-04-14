@@ -2,9 +2,6 @@
     files = {
         "src/engine/determine/jourman.cpp"
     },
-    depfiles_format = "gcc",
-    depfiles = "jourman.o: src/engine/determine/jourman.cpp  src/engine/determine/jourman.h src/engine/determine/shmem.h\
-",
     values = {
         "/usr/bin/gcc",
         {
@@ -24,5 +21,8 @@
             "-fno-omit-frame-pointer",
             "-fno-math-errno"
         }
-    }
+    },
+    depfiles_format = "gcc",
+    depfiles = "jourman.o: src/engine/determine/jourman.cpp  src/engine/determine/jourman.h src/engine/determine/shmem.h\
+"
 }

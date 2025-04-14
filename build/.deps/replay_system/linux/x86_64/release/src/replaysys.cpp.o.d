@@ -2,9 +2,6 @@
     files = {
         "src/replaysys.cpp"
     },
-    depfiles_format = "gcc",
-    depfiles = "replaysys.o: src/replaysys.cpp\
-",
     values = {
         "/usr/bin/gcc",
         {
@@ -24,5 +21,8 @@
             "-fno-omit-frame-pointer",
             "-fno-math-errno"
         }
-    }
+    },
+    depfiles_format = "gcc",
+    depfiles = "replaysys.o: src/replaysys.cpp\
+"
 }

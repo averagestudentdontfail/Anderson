@@ -2,9 +2,6 @@
     files = {
         "src/engine/system/latmon.cpp"
     },
-    depfiles_format = "gcc",
-    depfiles = "latmon.o: src/engine/system/latmon.cpp src/engine/system/latmon.h\
-",
     values = {
         "/usr/bin/gcc",
         {
@@ -24,5 +21,8 @@
             "-fno-omit-frame-pointer",
             "-fno-math-errno"
         }
-    }
+    },
+    depfiles_format = "gcc",
+    depfiles = "latmon.o: src/engine/system/latmon.cpp src/engine/system/latmon.h\
+"
 }

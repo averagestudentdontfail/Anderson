@@ -2,9 +2,6 @@
     files = {
         "src/engine/determine/shmem.cpp"
     },
-    depfiles_format = "gcc",
-    depfiles = "shmem.o: src/engine/determine/shmem.cpp src/engine/determine/shmem.h\
-",
     values = {
         "/usr/bin/gcc",
         {
@@ -24,5 +21,8 @@
             "-fno-omit-frame-pointer",
             "-fno-math-errno"
         }
-    }
+    },
+    depfiles_format = "gcc",
+    depfiles = "shmem.o: src/engine/determine/shmem.cpp src/engine/determine/shmem.h\
+"
 }

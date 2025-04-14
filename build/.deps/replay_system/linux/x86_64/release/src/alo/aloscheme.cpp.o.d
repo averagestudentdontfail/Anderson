@@ -2,9 +2,6 @@
     files = {
         "src/alo/aloscheme.cpp"
     },
-    depfiles_format = "gcc",
-    depfiles = "aloscheme.o: src/alo/aloscheme.cpp src/alo/aloengine.h  src/alo/../numerics/integrate.h src/alo/../numerics/integrator.h  src/alo/../numerics/../common/simd/simdops.h  src/alo/../numerics/../common/simd/vectmth.h  src/alo/../numerics/chebyshev.h\
-",
     values = {
         "/usr/bin/gcc",
         {
@@ -24,5 +21,8 @@
             "-fno-omit-frame-pointer",
             "-fno-math-errno"
         }
-    }
+    },
+    depfiles_format = "gcc",
+    depfiles = "aloscheme.o: src/alo/aloscheme.cpp src/alo/aloengine.h  src/alo/../numerics/integrate.h src/alo/../numerics/integrator.h  src/alo/../numerics/../common/simd/simdops.h  src/alo/../numerics/../common/simd/vectmth.h  src/alo/../numerics/chebyshev.h\
+"
 }

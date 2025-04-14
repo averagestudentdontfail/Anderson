@@ -1,6 +1,6 @@
 {
     files = {
-        "src/alo/alofpeval.cpp"
+        "src/test/unitest/alounitest.cpp"
     },
     values = {
         "/usr/bin/gcc",
@@ -23,6 +23,6 @@
         }
     },
     depfiles_format = "gcc",
-    depfiles = "alofpeval.o: src/alo/alofpeval.cpp src/alo/aloengine.h  src/alo/../numerics/integrate.h src/alo/../numerics/integrator.h  src/alo/../numerics/../common/simd/simdops.h  src/alo/../numerics/../common/simd/vectmth.h  src/alo/../numerics/chebyshev.h\
+    depfiles = "alounitest.o: src/test/unitest/alounitest.cpp\
 "
 }
