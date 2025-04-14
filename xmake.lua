@@ -34,23 +34,35 @@ local run_lib_paths = {
 
 -- Define source files
 local alo_sources = {
-    "src/alo/alo_engine.cpp",
-    "src/alo/alo_fp_evaluator.cpp",
-    "src/alo/alo_scheme.cpp"
+    "src/alo/aloengine.cpp",
+    "src/alo/alofpeval.cpp",
+    "src/alo/aloscheme.cpp"
 }
 
 local numerics_sources = {
     "src/numerics/chebyshev.cpp",
-    "src/numerics/integration.cpp"
+    "src/numerics/integrate.cpp"
 }
 
--- Add volatility arbitrage sources
-local vol_arb_sources = {
-    "src/vol_arb/models/gjr_garch.cpp",
-    "src/vol_arb/models/hmm.cpp",
-    "src/vol_arb/models/hybrid_model.cpp",
-    "src/vol_arb/strategy/vol_arb_strategy.cpp",
-    "src/vol_arb/strategy/opportunity_scanner.cpp"
+-- Common components
+local common_sources = {
+    -- No cpp files for now, just headers
+}
+
+-- Engine components - deterministic execution framework
+local engine_determine_sources = {
+    "src/engine/determine/jourman.cpp",
+    "src/engine/determine/manmem.cpp",
+    "src/engine/determine/priceman.cpp",
+    "src/engine/determine/schedman.cpp",
+    "src/engine/determine/shmem.cpp"
+}
+
+-- System components
+local engine_system_sources = {
+    "src/engine/system/harcount.cpp",
+    "src/engine/system/latmon.cpp",
+    "src/engine/system/procore.cpp"
 }
 
 -- Add common configurations to all targets
@@ -59,20 +71,20 @@ function add_common_config()
     for _, dir in ipairs(include_dirs) do
         add_includedirs(dir)
     end
-    
+   
     -- Link directories
     for _, dir in ipairs(link_dirs) do
         add_linkdirs(dir)
     end
-    
+   
     -- Libraries
     for _, lib in ipairs(libraries) do
         add_links(lib)
     end
-    
+   
     -- Compiler Flags
     add_cxflags("-Wall")
-    
+   
     if is_mode("debug") then
         add_cxflags("-g", "-O0")
         add_defines("DEBUG")
@@ -81,58 +93,85 @@ function add_common_config()
         add_defines("NDEBUG")
         add_cxflags("-march=native", "-fno-strict-aliasing", "-fno-omit-frame-pointer", "-fno-math-errno")
     end
-    
+   
     -- Set runtime library path
     add_runenvs("LD_LIBRARY_PATH", table.concat(run_lib_paths, ":") .. ":${LD_LIBRARY_PATH}")
 end
 
--- Main pricing engine
+-- Main pricing system
 target("pricing_system")
     set_kind("binary")
     add_files("src/main.cpp")
     add_files(alo_sources)
     add_files(numerics_sources)
+    add_files(engine_determine_sources)
+    add_files(engine_system_sources)
     add_common_config()
 
--- Replay system
-target("replay_system")
-    set_kind("binary")
-    add_files("src/replay_system.cpp")
-    add_files(alo_sources)
-    add_files(numerics_sources)
-    add_common_config()
-
--- Monitoring tool
+-- Monitor tool
 target("monitor_tool")
     set_kind("binary")
-    add_files("src/monitor.cpp")
-    add_files(alo_sources)
-    add_files(numerics_sources)
+    add_files("src/tools/monitor/montool.cpp")
+    add_files(engine_determine_sources)
     add_common_config()
 
 -- Unit tests
 target("unit_tests")
     set_kind("binary")
-    add_files("src/unit_tests.cpp")
+    add_files("src/test/unitest/*.cpp")
     add_files(alo_sources)
     add_files(numerics_sources)
+    add_files(engine_determine_sources)
+    add_files(engine_system_sources)
     add_common_config()
-    
+   
     -- Add test rule
     on_test(function (target)
         os.execv(target:targetfile())
     end)
 
--- Volatility arbitrage test
-target("vol_arb_test")
+-- Performance tests
+target("perf_tests")
     set_kind("binary")
-    add_files("src/test_cases/volatility_arbitrage_test.cpp")
+    add_files("src/test/perfortest/*.cpp")
     add_files(alo_sources)
     add_files(numerics_sources)
-    add_files(vol_arb_sources)
+    add_files(engine_determine_sources)
+    add_files(engine_system_sources)
     add_common_config()
-    
-    -- Add test rule
-    on_test(function (target)
-        os.execv(target:targetfile())
-    end)
+
+-- Integration tests
+target("integ_tests")
+    set_kind("binary")
+    add_files("src/test/integtest/*.cpp")
+    add_files(alo_sources)
+    add_files(numerics_sources)
+    add_files(engine_determine_sources)
+    add_files(engine_system_sources)
+    add_common_config()
+
+-- Replay system
+target("replay_system")
+    set_kind("binary")
+    add_files("src/replaysys.cpp")
+    add_files(alo_sources)
+    add_files(numerics_sources)
+    add_files(engine_determine_sources)
+    add_common_config()
+
+-- Benchmark tool
+target("bench_tool")
+    set_kind("binary")
+    add_files("src/tools/benchmark/bentool.cpp")
+    add_files(alo_sources)
+    add_files(numerics_sources)
+    add_files(engine_determine_sources)
+    add_files(engine_system_sources)
+    add_common_config()
+
+-- Replay tool
+target("replay_tool")
+    set_kind("binary")
+    add_files("src/tools/replay/reptool.cpp")
+    add_files(engine_determine_sources)
+    add_common_config()

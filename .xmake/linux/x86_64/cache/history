@@ -1,10 +1,5 @@
 {
     cmdlines = {
-        "xmake run",
-        "xmake run monitor_tool",
-        "xmake run pricing_system",
-        "xmake clean",
-        "xmake ",
         "xmake lua /home/send2/.local/share/xmake/modules/private/utils/statistics.lua",
         "xmake lua /home/send2/.local/share/xmake/actions/build/cleaner.lua",
         "xmake run pricing_system",
@@ -64,6 +59,11 @@
         "xmake run vol_arb_test",
         "xmake clean",
         "xmake ",
-        "xmake run vol_arb_test"
+        "xmake run vol_arb_test",
+        "xmake clean",
+        "xmake clean",
+        "xmake ",
+        "xmake lua /home/send2/.local/share/xmake/modules/private/utils/statistics.lua",
+        "xmake lua /home/send2/.local/share/xmake/actions/build/cleaner.lua"
     }
 }
