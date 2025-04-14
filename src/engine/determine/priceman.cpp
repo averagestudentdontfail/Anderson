@@ -11,7 +11,7 @@
 #include <immintrin.h>
 
 #include "../../alo/aloengine.h"
-#include "../../alo/aloscheme.h"    
+#include "../../alo/aloscheme.cpp"    
 
 namespace engine {
 namespace determine {

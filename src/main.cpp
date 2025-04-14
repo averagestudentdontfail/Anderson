@@ -6,8 +6,35 @@
 #include <functional>
 #include <string>
 #include <memory>
-#include "alo/alo_engine.h"
-#include "deterministic_pricing_system.h" // Include the deterministic pricing system header
+#include <thread>
+#include <signal.h>
+#include <atomic>
+
+#include "alo/aloengine.h"
+#include "numerics/chebyshev.h"
+#include "numerics/integrate.h"
+#include "engine/determine/priceman.h"
+#include "engine/determine/schedman.h"
+#include "engine/determine/manmem.h"
+#include "engine/determine/jourman.h"
+#include "engine/determine/shmem.h"
+#include "engine/system/procore.h"
+#include "engine/system/harcount.h"
+#include "engine/system/latmon.h"
+#include "common/profile/perfmon.h"
+#include "common/profile/timemon.h"
+#include "common/concurrency/threadpool.h"
+
+// Flag for graceful shutdown
+std::atomic<bool> running(true);
+
+// Signal handler
+void signal_handler(int signal) {
+    if (signal == SIGINT || signal == SIGTERM) {
+        std::cout << "\nShutting down...\n";
+        running = false;
+    }
+}
 
 // Structure to represent a test case
 struct TestCase {
@@ -237,6 +264,233 @@ void runSensitivityAnalysis(const TestCase& baseCase) {
     std::cout << "+--------+-------------+---------------+\n";
 }
 
+// Function to initialize and run the deterministic pricing system
+int initializeSystem(int argc, char** argv) {
+    // Set up signal handler for graceful shutdown
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+    
+    // Initialize processor core manager
+    auto& core_manager = engine::system::ProcessorCoreManager::getInstance();
+    if (!core_manager.initialize()) {
+        std::cerr << "Error: Failed to initialize processor core manager." << std::endl;
+        return 1;
+    }
+    
+    // Reserve cores for pricing
+    auto pricing_cores = core_manager.reserveCores(4, "Pricing", true, true);
+    if (pricing_cores.empty()) {
+        std::cerr << "Warning: Failed to reserve cores for pricing." << std::endl;
+    } else {
+        std::cout << "Reserved " << pricing_cores.size() << " cores for pricing." << std::endl;
+    }
+    
+    // Initialize memory manager
+    auto& memory_manager = engine::determine::MemoryManager::getInstance();
+    // Use larger memory pools for production
+    engine::determine::MemoryManager memory_manager_instance(
+        128 * 1024 * 1024,  // 128 MB global pool
+        16 * 1024 * 1024,   // 16 MB per-cycle pool
+        4                   // 4 cycle pools
+    );
+    
+    // Try to lock memory to prevent swapping
+    if (!engine::determine::MemoryManager::lockMemory()) {
+        std::cerr << "Warning: Failed to lock memory. Performance may be degraded." << std::endl;
+    }
+    
+    // Initialize journal manager
+    auto& journal_manager = engine::determine::JournalManager::getInstance();
+    auto journal = journal_manager.getJournal("pricing", "pricing_events.bin", "w+");
+    if (!journal) {
+        std::cerr << "Error: Failed to create event journal." << std::endl;
+        return 1;
+    }
+    
+    // Initialize performance and latency monitoring
+    auto& perf_mon = profile::PerfMon::instance();
+    auto request_counter = perf_mon.create_counter("Pricing Requests");
+    auto result_counter = perf_mon.create_counter("Pricing Results");
+    auto pricing_histogram = perf_mon.create_histogram("Pricing Latency");
+    
+    auto& latency_manager = engine::system::LatencyMonitorManager::getInstance();
+    auto pricing_latency = latency_manager.createMonitor("Pricing Latency");
+    
+    // Initialize hardware counter manager
+    auto& hw_counter_manager = engine::system::HardwareCounterManager::getInstance();
+    if (hw_counter_manager.isAvailable()) {
+        auto cycles_counter = hw_counter_manager.createCounter(
+            engine::system::CounterType::CYCLES, "CPU Cycles");
+        auto instr_counter = hw_counter_manager.createCounter(
+            engine::system::CounterType::INSTRUCTIONS, "Instructions");
+        auto cache_counter = hw_counter_manager.createCounter(
+            engine::system::CounterType::CACHE_MISSES, "Cache Misses");
+        
+        // Start hardware counters
+        hw_counter_manager.startAll();
+    } else {
+        std::cerr << "Warning: Hardware counters not available on this system." << std::endl;
+    }
+    
+    // Initialize scheduler manager
+    auto& scheduler_manager = engine::determine::SchedulerManager::getInstance();
+    scheduler_manager.initialize(2, 1000000, 32); // 2 schedulers, 1ms cycle, 32 tasks per cycle
+    
+    // Pin schedulers to cores if available
+    std::vector<int> scheduler_cores;
+    if (!pricing_cores.empty()) {
+        scheduler_cores.push_back(pricing_cores[0]);
+        if (pricing_cores.size() > 1) {
+            scheduler_cores.push_back(pricing_cores[1]);
+        }
+    }
+    scheduler_manager.startAll(scheduler_cores);
+    
+    // Initialize thread pool for pricing
+    size_t num_threads = std::max(1u, std::thread::hardware_concurrency() - 2);
+    concurrency::ThreadPool thread_pool(num_threads);
+    
+    // Initialize shared memory for monitoring
+    auto& shmem_manager = engine::determine::SharedMemoryManager::getInstance();
+    auto shmem_channel = shmem_manager.getChannel("alo_pricing_system", true);
+    if (!shmem_channel || !shmem_channel->isValid()) {
+        std::cerr << "Warning: Failed to create shared memory channel." << std::endl;
+    }
+    
+    // Initialize pricing manager
+    auto& pricing_manager = engine::determine::PricingManager::getInstance();
+    pricing_manager.initialize(4, 0, true); // 4 pricers, scheme 0, use scheduler
+    
+    // Set up journal for pricing manager
+    pricing_manager.setJournal(journal);
+    
+    // Start pricing manager
+    if (!pricing_manager.start()) {
+        std::cerr << "Error: Failed to start pricing manager." << std::endl;
+        return 1;
+    }
+    
+    std::cout << "Deterministic Pricing System initialized successfully." << std::endl;
+    std::cout << "Accepting pricing requests..." << std::endl;
+    
+    // Heartbeat thread
+    std::thread heartbeat_thread([&]() {
+        while (running) {
+            // Update shared memory heartbeat
+            if (shmem_channel && shmem_channel->isValid()) {
+                shmem_channel->updateHeartbeat();
+                
+                // Update shared memory block with stats
+                auto* block = shmem_channel->get();
+                if (block) {
+                    // Update request queue size
+                    block->requestQueueSize = pricing_manager.getStats().currentQueueDepth;
+                    
+                    // Update total requests
+                    block->totalRequests = pricing_manager.getStats().totalRequests;
+                    
+                    // Update completed requests
+                    block->completedRequests = pricing_manager.getStats().totalCompletedRequests;
+                    
+                    // Update average processing time
+                    auto stats = pricing_latency->getStats();
+                    block->avgProcessingTimeUs = stats.avg_us;
+                    block->maxProcessingTimeUs = stats.max_us;
+                    
+                    // Update cache hit ratio (example)
+                    block->cacheHitRatio = 0.85; // Placeholder
+                }
+            }
+            
+            // Sleep for 100ms
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    });
+    
+    // Periodically generate test requests to demonstrate the system
+    std::thread test_request_thread([&]() {
+        // Define some test options
+        std::vector<engine::determine::PricingRequest> test_requests = {
+            {100.0, 100.0, 0.05, 0.01, 0.20, 1.0, true, true},  // ATM Put
+            {100.0, 110.0, 0.05, 0.01, 0.20, 1.0, true, true},  // ITM Put
+            {100.0, 90.0, 0.05, 0.01, 0.20, 1.0, true, true},   // OTM Put
+            {100.0, 100.0, 0.05, 0.01, 0.40, 1.0, true, true}   // High vol Put
+        };
+        
+        // Callback for handling results
+        auto result_callback = [&](const engine::determine::PricingResult& result) {
+            result_counter->increment();
+            pricing_histogram->observe(result.processing_time_us / 1000.0); // Convert to ms
+            
+            // Display result
+            std::cout << "\rRequests: " << request_counter->value() 
+                      << ", Results: " << result_counter->value() 
+                      << ", Avg Latency: " << pricing_histogram->mean() << " ms     " << std::flush;
+        };
+        
+        // Generate requests while the system is running
+        while (running) {
+            // Submit a few test requests
+            for (const auto& req : test_requests) {
+                // Skip if we've already generated a lot of requests
+                if (request_counter->value() > 1000 && request_counter->value() % 10 != 0) {
+                    break;
+                }
+                
+                // Create a scoped latency measurement
+                engine::system::ScopedLatencyMeasurement latency_measure(pricing_latency);
+                
+                // Submit the request
+                pricing_manager.submitRequest(req, result_callback);
+                request_counter->increment();
+                
+                // Sleep briefly between requests
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                
+                // Check if we're still running
+                if (!running) break;
+            }
+            
+            // Sleep between batches
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+    });
+    
+    // Main thread just waits for shutdown signal
+    while (running) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    
+    // Clean up
+    std::cout << "\nStopping Deterministic Pricing System..." << std::endl;
+    
+    // Stop threads
+    if (test_request_thread.joinable()) {
+        test_request_thread.join();
+    }
+    
+    if (heartbeat_thread.joinable()) {
+        heartbeat_thread.join();
+    }
+    
+    // Stop components
+    pricing_manager.stop();
+    scheduler_manager.stopAll();
+    hw_counter_manager.stopAll();
+    
+    // Print statistics
+    std::cout << "\nPricing Statistics:\n" << pricing_manager.getStatistics() << std::endl;
+    std::cout << "Scheduler Statistics:\n" << scheduler_manager.getStatistics() << std::endl;
+    
+    // Release resources
+    for (int core_id : pricing_cores) {
+        core_manager.releaseCore(core_id);
+    }
+    
+    std::cout << "System shutdown complete." << std::endl;
+    return 0;
+}
+
 // Main function
 int main(int argc, char** argv) {
     // Define test cases
@@ -267,7 +521,7 @@ int main(int argc, char** argv) {
     std::cout << "================================================================================\n\n";
     
     // Display basic program info
-    std::cout << "This program implements the Andersen-Lake-Offengenden algorithm for\n";
+    std::cout << "This program implements the Andersen-Lake-Offengelden algorithm for\n";
     std::cout << "pricing American put options with high accuracy and performance.\n\n";
     
     // Run benchmarks

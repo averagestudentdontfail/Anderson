@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <memory>
 #include <functional>
+#include <limits>
 
 namespace engine {
 namespace system {
@@ -41,6 +42,10 @@ struct LatencyStats {
  */
 class LatencyMonitor {
 public:
+    // High-resolution clock for measurements
+    using clock_type = std::chrono::high_resolution_clock;
+    using time_point = clock_type::time_point;
+
     /**
      * @brief Constructor
      * 
@@ -103,6 +108,9 @@ public:
      * @param size New window size
      */
     void setWindowSize(size_t size);
+
+    // Friend declaration for ScopedLatencyMeasurement
+    friend class ScopedLatencyMeasurement;
     
 private:
     std::string name_;
@@ -121,10 +129,6 @@ private:
     
     // Calculate percentile from samples
     double calculatePercentile(double percentile) const;
-    
-    // High-resolution clock for measurements
-    using clock_type = std::chrono::high_resolution_clock;
-    using time_point = clock_type::time_point;
     
     // Map to store start times
     mutable std::mutex start_times_mutex_;
@@ -240,3 +244,5 @@ private:
 
 } // namespace system
 } // namespace engine
+
+#endif // ENGINE_SYSTEM_LATMON_H

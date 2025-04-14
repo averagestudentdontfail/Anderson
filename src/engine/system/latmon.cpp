@@ -7,24 +7,35 @@
 namespace engine {
 namespace system {
 
-// -----------------------------------------------------------------------------
-// LatencyMonitor Implementation
-// -----------------------------------------------------------------------------
-
 LatencyMonitor::LatencyMonitor(const std::string& name, size_t window_size)
     : name_(name), window_size_(window_size) {
-    // Reserve space for samples
-    std::lock_guard<std::mutex> lock(mutex_);
-    recent_samples_.reserve(window_size);
+    // No need to reserve space for std::deque - it doesn't have reserve method
 }
 
 void LatencyMonitor::recordLatency(double latency_us) {
     // Update running statistics
     count_.fetch_add(1, std::memory_order_relaxed);
-    sum_us_.fetch_add(latency_us, std::memory_order_relaxed);
-    sum_squared_us_.fetch_add(latency_us * latency_us, std::memory_order_relaxed);
     
-    // Update min/max atomically
+    // For atomic<double>, we need to use a different approach since fetch_add isn't supported
+    // Update sum atomically
+    double current_sum = sum_us_.load(std::memory_order_relaxed);
+    double new_sum;
+    do {
+        new_sum = current_sum + latency_us;
+    } while (!sum_us_.compare_exchange_weak(current_sum, new_sum, 
+                                         std::memory_order_relaxed, 
+                                         std::memory_order_relaxed));
+    
+    // Update sum_squared atomically
+    double current_sum_squared = sum_squared_us_.load(std::memory_order_relaxed);
+    double new_sum_squared;
+    do {
+        new_sum_squared = current_sum_squared + (latency_us * latency_us);
+    } while (!sum_squared_us_.compare_exchange_weak(current_sum_squared, new_sum_squared, 
+                                                 std::memory_order_relaxed, 
+                                                 std::memory_order_relaxed));
+    
+    // Update min atomically
     double current_min = min_us_.load(std::memory_order_relaxed);
     while (latency_us < current_min) {
         if (min_us_.compare_exchange_weak(current_min, latency_us, 
@@ -34,6 +45,7 @@ void LatencyMonitor::recordLatency(double latency_us) {
         }
     }
     
+    // Update max atomically
     double current_max = max_us_.load(std::memory_order_relaxed);
     while (latency_us > current_max) {
         if (max_us_.compare_exchange_weak(current_max, latency_us, 
@@ -115,7 +127,7 @@ LatencyStats LatencyMonitor::getStats() const {
     // Calculate standard deviation
     double sum_squared = sum_squared_us_.load(std::memory_order_relaxed);
     double variance = (sum_squared / count) - (stats.avg_us * stats.avg_us);
-    stats.stddev_us = std::sqrt(variance);
+    stats.stddev_us = std::sqrt(variance > 0.0 ? variance : 0.0);  // Avoid negative due to fp precision
     
     // Calculate percentiles
     stats.median_us = calculatePercentile(50.0);
@@ -137,6 +149,12 @@ void LatencyMonitor::reset() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         recent_samples_.clear();
+    }
+    
+    // Clear start times
+    {
+        std::lock_guard<std::mutex> lock(start_times_mutex_);
+        start_times_.clear();
     }
 }
 
@@ -166,6 +184,14 @@ double LatencyMonitor::calculatePercentile(double percentile) const {
     size_t idx_lower = static_cast<size_t>(std::floor(idx));
     size_t idx_upper = static_cast<size_t>(std::ceil(idx));
     
+    // Check bounds to avoid segfaults
+    if (idx_lower >= samples.size()) {
+        idx_lower = samples.size() - 1;
+    }
+    if (idx_upper >= samples.size()) {
+        idx_upper = samples.size() - 1;
+    }
+    
     // Linear interpolation
     if (idx_lower == idx_upper) {
         return samples[idx_lower];
@@ -175,10 +201,6 @@ double LatencyMonitor::calculatePercentile(double percentile) const {
         return weight_lower * samples[idx_lower] + weight_upper * samples[idx_upper];
     }
 }
-
-// -----------------------------------------------------------------------------
-// LatencyMonitorManager Implementation
-// -----------------------------------------------------------------------------
 
 LatencyMonitorManager& LatencyMonitorManager::getInstance() {
     static LatencyMonitorManager instance;
@@ -229,12 +251,8 @@ void LatencyMonitorManager::resetAll() {
     }
 }
 
-// -----------------------------------------------------------------------------
-// ScopedLatencyMeasurement Implementation
-// -----------------------------------------------------------------------------
-
 ScopedLatencyMeasurement::ScopedLatencyMeasurement(std::shared_ptr<LatencyMonitor> monitor)
-    : monitor_(monitor) {
+    : monitor_(monitor), token_(0) {
     
     // Start the measurement
     if (monitor_) {

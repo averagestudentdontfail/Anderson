@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <limits>  // Add this include for std::numeric_limits
 
 namespace engine {
 namespace determine {
@@ -110,18 +111,18 @@ MemoryPool::MemoryPool(size_t capacity, bool useHugePages)
             MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB,
             -1, 0));
         
-        if (buffer_ != MAP_FAILED) {
+        if (buffer_ != static_cast<uint8_t*>(MAP_FAILED)) {
             usesHugePages_ = true;
         } else {
             // Fallback to regular pages if huge pages failed
-            buffer_ = MAP_FAILED;
+            buffer_ = static_cast<uint8_t*>(MAP_FAILED);
         }
     } else {
-        buffer_ = MAP_FAILED;
+        buffer_ = static_cast<uint8_t*>(MAP_FAILED);
     }
     
     // If huge pages failed or weren't requested, use regular pages
-    if (buffer_ == MAP_FAILED) {
+    if (buffer_ == static_cast<uint8_t*>(MAP_FAILED)) {
         buffer_ = static_cast<uint8_t*>(mmap(
             nullptr, capacity_, 
             PROT_READ | PROT_WRITE,
@@ -148,7 +149,7 @@ MemoryPool::MemoryPool(size_t capacity, bool useHugePages)
 }
 
 MemoryPool::~MemoryPool() {
-    if (buffer_ && buffer_ != MAP_FAILED) {
+    if (buffer_ && buffer_ != static_cast<uint8_t*>(MAP_FAILED)) {
         // Release lock if we previously locked it
         munlock(buffer_, capacity_);
         
@@ -203,4 +204,4 @@ void PerCycleAllocator::reset() {
 }
 
 } 
-} 
+}

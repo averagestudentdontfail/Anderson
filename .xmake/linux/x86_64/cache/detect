@@ -1,8 +1,61 @@
 {
+    find_program_gcc_arch_x86_64_plat_linux_checktoolcxx = {
+        gcc = "/usr/bin/gcc"
+    },
+    find_programver = {
+        ["/usr/bin/gcc"] = "13.3.0-6ubuntu2"
+    },
+    ["lib.detect.has_flags"] = {
+        ["linux_x86_64_/usr/bin/gcc_13.3.0-6ubuntu2_cxx_cxflags_-m64_-fno-omit-frame-pointer"] = true,
+        ["linux_x86_64_/usr/bin/gcc_13.3.0-6ubuntu2_cxx_cxflags_-m64_-O3"] = true,
+        ["linux_x86_64_/usr/bin/gcc_13.3.0-6ubuntu2_cxx_cxflags_-m64_-march=native"] = true,
+        ["linux_x86_64_/usr/bin/gcc_13.3.0-6ubuntu2_cxx_cxflags_-m64_-fno-strict-aliasing"] = true,
+        ["linux_x86_64_/usr/bin/gcc_13.3.0-6ubuntu2_cxx_cxflags_-m64_-fno-math-errno"] = true,
+        ["linux_x86_64_/usr/bin/gcc_13.3.0-6ubuntu2_cxx_cxflags_-m64_-Wno-gnu-line-marker -Werror"] = true,
+        ["linux_x86_64_/usr/bin/gcc_13.3.0-6ubuntu2_cxx_cxflags_-m64_-MMD -MF"] = true,
+        ["linux_x86_64_/usr/bin/gcc_13.3.0-6ubuntu2_cxx_cxflags_-m64_-Wall"] = true,
+        ["linux_x86_64_/usr/bin/gcc_13.3.0-6ubuntu2_cxx__-m64_-fPIC"] = true,
+        ["linux_x86_64_/usr/bin/gcc_13.3.0-6ubuntu2_cxx_cxflags_-m64_-fdiagnostics-color=always"] = true
+    },
+    ["core.tools.gcc.has_cflags"] = {
+        ["/usr/bin/gcc_13.3.0-6ubuntu2"] = {
+            ["-Xassembler"] = true,
+            ["-o"] = true,
+            ["-print-sysroot"] = true,
+            ["--target-help"] = true,
+            ["--version"] = true,
+            ["-print-multi-lib"] = true,
+            ["-save-temps"] = true,
+            ["-dumpmachine"] = true,
+            ["-Xpreprocessor"] = true,
+            ["-E"] = true,
+            ["-S"] = true,
+            ["-print-multiarch"] = true,
+            ["-Xlinker"] = true,
+            ["-dumpversion"] = true,
+            ["-x"] = true,
+            ["-B"] = true,
+            ["-dumpspecs"] = true,
+            ["-shared"] = true,
+            ["--help"] = true,
+            ["--param"] = true,
+            ["-time"] = true,
+            ["-pipe"] = true,
+            ["-print-sysroot-headers-suffix"] = true,
+            ["-no-canonical-prefixes"] = true,
+            ["-pass-exit-codes"] = true,
+            ["-print-multi-directory"] = true,
+            ["-v"] = true,
+            ["-print-search-dirs"] = true,
+            ["-pie"] = true,
+            ["-print-multi-os-directory"] = true,
+            ["-c"] = true,
+            ["-print-libgcc-file-name"] = true
+        }
+    },
     find_program = {
-        gcc = "/usr/bin/gcc",
         nim = false,
-        ping = "/usr/bin/ping",
-        git = "/usr/bin/git"
+        ["/usr/bin/gcc"] = "/usr/bin/gcc",
+        gcc = "/usr/bin/gcc"
     }
 }
