@@ -2,7 +2,6 @@
     cmdlines = {
         "xmake run vol_arb_test",
         "xmake run vol_arb_test",
-        "xmake run vol_arb_test",
         "xmake clean",
         "xmake ",
         "xmake lua /home/send2/.local/share/xmake/modules/private/utils/statistics.lua",
@@ -64,6 +63,7 @@
         "xmake ",
         "xmake ",
         "xmake clean",
+        "xmake ",
         "xmake "
     }
 }
