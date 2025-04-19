@@ -2,7 +2,7 @@
 #define ENGINE_ALO_OPT_VECTOR_H
 
 #include "simd.h"
-#include <sleef.h> 
+#include <sleef.h>
 #include <immintrin.h>  
 #include <array>
 #include <cmath>

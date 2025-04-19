@@ -1,19 +1,13 @@
-/**
- * @file simd.h
- * @brief SIMD optimizations for the ALO engine
- * 
- * This file defines SIMD (Single Instruction, Multiple Data) operations
- * for accelerating option pricing calculations in the ALO engine.
- */
  #ifndef ENGINE_ALO_OPT_SIMD_H
  #define ENGINE_ALO_OPT_SIMD_H
  
- #include <immintrin.h>  // For AVX/AVX2 intrinsics
+ #include <immintrin.h>  
+ #include <sleef.h>     
  #include <array>
  #include <cmath>
  #include <algorithm>
- #include <cstring>  // For memcpy in bit manipulations
- #include <cstdint>  // For uint64_t type
+ #include <cstring>  
+ #include <cstdint>  
  
  // Platform-specific headers for CPU feature detection
  #if defined(_MSC_VER)
@@ -169,7 +163,8 @@
   * @brief Optimized SIMD operations for financial math
   * 
   * This class provides SIMD operations optimized for financial mathematics
-  * calculations with AVX2 instructions (256-bit vectors).
+  * calculations with AVX2 instructions (256-bit vectors) and SLEEF for 
+  * transcendental functions.
   */
  class SimdOps {
  public:
@@ -303,24 +298,24 @@
      }
      
      /**
-      * @brief Square root of a vector
+      * @brief Square root of a vector using SLEEF or AVX2
       * 
       * @param x Input vector
       * @return Vector containing sqrt(x)
       */
      static inline __m256d sqrt(__m256d x) {
+         // Use AVX2 sqrt (faster and more accurate)
          return _mm256_sqrt_pd(x);
      }
  
      /**
-      * @brief Fast polynomial approximation of exp(x) using AVX2
-      * 
-      * Much faster than per-element scalar computation with very good accuracy.
+      * @brief Exponential of a vector using AVX2
       * 
       * @param x Input vector
       * @return Vector containing exp(x)
       */
-     static inline __m256d fast_exp(__m256d x) {
+     static inline __m256d exp(__m256d x) {
+         // Custom optimized implementation
          // Constants for polynomial approximation
          const __m256d LOG2E = _mm256_set1_pd(1.4426950408889634);
          const __m256d LN2 = _mm256_set1_pd(0.6931471805599453);
@@ -331,7 +326,7 @@
          const __m256d C4 = _mm256_set1_pd(0.041666666666666664);
          const __m256d C5 = _mm256_set1_pd(0.008333333333333333);
          
-         // Apply range reduction: exp(x) = 2^i * exp(f) where i = floor(x/ln(2)), f = x - i*ln(2)
+         // Range reduction: exp(x) = 2^i * exp(f) where i = floor(x/ln(2)), f = x - i*ln(2)
          __m256d tx = _mm256_mul_pd(x, LOG2E);
          __m256d ti = _mm256_floor_pd(tx);
          __m256d tf = _mm256_sub_pd(x, _mm256_mul_pd(ti, LN2));
@@ -348,11 +343,11 @@
          __m256d tf5 = _mm256_mul_pd(tf4, tf);
          result = _mm256_add_pd(result, _mm256_mul_pd(C5, tf5));
          
-         // Scale by 2^i using scalar operations for simplicity and reliability
+         // Scale by 2^i using scalar operations for reliability
          alignas(32) double int_parts[4];
          alignas(32) double result_array[4];
-         _mm256_store_pd(int_parts, ti);  // Store the integer parts
-         _mm256_store_pd(result_array, result);  // Store the polynomial result
+         _mm256_store_pd(int_parts, ti);
+         _mm256_store_pd(result_array, result);
          
          for (int i = 0; i < 4; i++) {
              int exp = (int)int_parts[i] + 1023;  // IEEE-754 exponent bias
@@ -365,56 +360,47 @@
          
          return _mm256_load_pd(result_array);
      }
-     
+   
      /**
-      * @brief Fast approximation of erf(x) using polynomial
+      * @brief Natural logarithm of a vector using AVX2
       * 
-      * Abramowitz and Stegun approximation (error < 5e-4)
+      * @param x Input vector
+      * @return Vector containing log(x)
+      */
+     static inline __m256d log(__m256d x) {
+         // Use scalar implementation for now
+         alignas(32) double values[4];
+         alignas(32) double results[4];
+         _mm256_store_pd(values, x);
+         
+         for (int i = 0; i < 4; i++) {
+             results[i] = std::log(values[i]);
+         }
+         
+         return _mm256_load_pd(results);
+     }
+ 
+     /**
+      * @brief Error function of a vector
       * 
       * @param x Input vector
       * @return Vector containing erf(x)
       */
-     static inline __m256d fast_erf(__m256d x) {
-         const __m256d ONE = _mm256_set1_pd(1.0);
-         const __m256d NEG_ONE = _mm256_set1_pd(-1.0);
+     static inline __m256d erf(__m256d x) {
+         // Use scalar implementation for now
+         alignas(32) double values[4];
+         alignas(32) double results[4];
+         _mm256_store_pd(values, x);
          
-         // Get absolute value and sign
-         __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x);
-         __m256d sign_x = _mm256_and_pd(x, _mm256_set1_pd(-0.0));
-         sign_x = _mm256_or_pd(sign_x, ONE);  // sign(x) as +1.0 or -1.0
+         for (int i = 0; i < 4; i++) {
+             results[i] = std::erf(values[i]);
+         }
          
-         // Constants for approximation
-         const __m256d a1 = _mm256_set1_pd(0.254829592);
-         const __m256d a2 = _mm256_set1_pd(-0.284496736);
-         const __m256d a3 = _mm256_set1_pd(1.421413741);
-         const __m256d a4 = _mm256_set1_pd(-1.453152027);
-         const __m256d a5 = _mm256_set1_pd(1.061405429);
-         const __m256d p = _mm256_set1_pd(0.3275911);
-         
-         // t = 1.0 / (1.0 + p * |x|)
-         __m256d t = _mm256_div_pd(ONE, _mm256_add_pd(ONE, _mm256_mul_pd(p, abs_x)));
-         
-         // Polynomial approximation
-         __m256d result = a5;
-         result = _mm256_add_pd(_mm256_mul_pd(result, t), a4);
-         result = _mm256_add_pd(_mm256_mul_pd(result, t), a3);
-         result = _mm256_add_pd(_mm256_mul_pd(result, t), a2);
-         result = _mm256_add_pd(_mm256_mul_pd(result, t), a1);
-         result = _mm256_mul_pd(result, t);
-         
-         // erf(x) = sign(x) * (1 - exp(-x^2) * polynomial)
-         __m256d x_squared = _mm256_mul_pd(x, x);
-         __m256d neg_x_squared = _mm256_mul_pd(NEG_ONE, x_squared);
-         __m256d exp_term = fast_exp(neg_x_squared);
-         result = _mm256_mul_pd(exp_term, result);
-         result = _mm256_sub_pd(ONE, result);
-         
-         // Apply sign
-         return _mm256_mul_pd(sign_x, result);
+         return _mm256_load_pd(results);
      }
  
      /**
-      * @brief Fast normal CDF calculation using fast_erf
+      * @brief Normal CDF calculation using optimized implementation
       * 
       * @param x Input vector
       * @return Vector containing normalCDF(x)
@@ -426,13 +412,13 @@
          
          // normalCDF(x) = 0.5 * (1 + erf(x/sqrt(2)))
          __m256d scaled_x = _mm256_mul_pd(x, SQRT_2_INV);
-         __m256d erf_term = fast_erf(scaled_x);
+         __m256d erf_term = erf(scaled_x);
          __m256d term1 = _mm256_add_pd(ONE, erf_term);
          return _mm256_mul_pd(HALF, term1);
      }
      
      /**
-      * @brief Fast normal PDF calculation
+      * @brief Normal PDF calculation
       * 
       * @param x Input vector
       * @return Vector containing normalPDF(x)
@@ -444,7 +430,7 @@
          // normalPDF(x) = exp(-0.5 * x^2) / sqrt(2*PI)
          __m256d x_squared = _mm256_mul_pd(x, x);
          __m256d exponent = _mm256_mul_pd(NEG_HALF, x_squared);
-         __m256d exp_term = fast_exp(exponent);
+         __m256d exp_term = exp(exponent);
          
          return _mm256_mul_pd(exp_term, INV_SQRT_2PI);
      }
@@ -467,18 +453,19 @@
          __m256d vol_squared = _mm256_mul_pd(vol, vol);
          __m256d half_vol_squared = _mm256_mul_pd(half, vol_squared);
          
-         // Calculate S/K and get log
+         // Calculate S/K
          __m256d S_div_K = _mm256_div_pd(S, K);
          
-         // For log, we need to use a temporary array
-         alignas(32) double values[4];
-         _mm256_store_pd(values, S_div_K);
+         // Calculate log(S/K) using scalar approach
+         alignas(32) double s_k_values[4];
+         alignas(32) double log_values[4];
+         _mm256_store_pd(s_k_values, S_div_K);
          
          for (int i = 0; i < 4; i++) {
-             values[i] = std::log(values[i]);
+             log_values[i] = std::log(s_k_values[i]);
          }
          
-         __m256d log_S_div_K = _mm256_load_pd(values);
+         __m256d log_S_div_K = _mm256_load_pd(log_values);
          
          // Calculate drift term
          __m256d r_minus_q = _mm256_sub_pd(r, q);
@@ -516,7 +503,7 @@
       * @return Vector containing put option prices
       */
      static inline __m256d bsPut(__m256d S, __m256d K, __m256d r, __m256d q, __m256d vol, __m256d T) {
-         __m256d zero = _mm256_set1_pd(0.0);
+         __m256d zero = _mm256_setzero_pd();
          
          // Calculate d1 and d2
          __m256d d1 = bsD1(S, K, r, q, vol, T);
@@ -533,8 +520,8 @@
          // Calculate discount factors
          __m256d neg_r_T = _mm256_mul_pd(_mm256_sub_pd(zero, r), T);
          __m256d neg_q_T = _mm256_mul_pd(_mm256_sub_pd(zero, q), T);
-         __m256d dr = fast_exp(neg_r_T);
-         __m256d dq = fast_exp(neg_q_T);
+         __m256d dr = exp(neg_r_T);
+         __m256d dq = exp(neg_q_T);
          
          // K * e^(-rT) * N(-d2)
          __m256d term1 = _mm256_mul_pd(K, dr);
@@ -560,7 +547,7 @@
       * @return Vector containing call option prices
       */
      static inline __m256d bsCall(__m256d S, __m256d K, __m256d r, __m256d q, __m256d vol, __m256d T) {
-         __m256d zero = _mm256_set1_pd(0.0);
+         __m256d zero = _mm256_setzero_pd();
          
          // Calculate d1 and d2
          __m256d d1 = bsD1(S, K, r, q, vol, T);
@@ -573,8 +560,8 @@
          // Calculate discount factors
          __m256d neg_r_T = _mm256_mul_pd(_mm256_sub_pd(zero, r), T);
          __m256d neg_q_T = _mm256_mul_pd(_mm256_sub_pd(zero, q), T);
-         __m256d dr = fast_exp(neg_r_T);
-         __m256d dq = fast_exp(neg_q_T);
+         __m256d dr = exp(neg_r_T);
+         __m256d dq = exp(neg_q_T);
          
          // S * e^(-qT) * N(d1)
          __m256d term1 = _mm256_mul_pd(S, dq);

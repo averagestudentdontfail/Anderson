@@ -5,6 +5,7 @@
 #include "num/chebyshev.h"
 #include "opt/cache.h"
 #include "opt/simd.h"
+#include "opt/vector.h"
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>

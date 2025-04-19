@@ -1,9 +1,8 @@
 # Makefile for building the ALO engine and test program
-
 # Compiler and flags
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -march=native -mavx2 -mfma
-LDFLAGS = -pthread -lm
+CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -march=native -mavx2 -mfma -I$(CURDIR)/vec/include
+LDFLAGS = -pthread -lm -L$(CURDIR)/vec/lib -lsleef -Wl,-rpath,$(CURDIR)/vec/lib
 
 # Directories
 SRC_DIR = src
