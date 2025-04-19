@@ -1,0 +1,11 @@
+{
+    errdata = "In file included from \27[01m\27[Ksrc/numerics/integrate.h:5\27[m\27[K,\
+                 from \27[01m\27[Ksrc/numerics/integrate.cpp:2\27[m\27[K:\
+\27[01m\27[Ksrc/numerics/../common/simd/simdops.h:\27[m\27[K In static member function ‘\27[01m\27[Kstatic __m256d simd::SimdOps::\27[01;32m\27[KnormalCDF\27[m\27[K(__m256d)\27[m\27[K’:\
+\27[01m\27[Ksrc/numerics/../common/simd/simdops.h:121:17:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kunused variable ‘\27[01m\27[Kone\27[m\27[K’ [\27[01;35m\27[K-Wunused-variable\27[m\27[K]\
+  121 |         __m256d \27[01;35m\27[Kone\27[m\27[K = set1(1.0);\
+      |                 \27[01;35m\27[K^~~\27[m\27[K\
+At global scope:\
+\27[01m\27[Kcc1plus:\27[m\27[K \27[01;36m\27[Knote: \27[m\27[Kunrecognized command-line option ‘\27[01m\27[K-Wno-gnu-line-marker\27[m\27[K’ may have been intended to silence earlier diagnostics\
+"
+}
