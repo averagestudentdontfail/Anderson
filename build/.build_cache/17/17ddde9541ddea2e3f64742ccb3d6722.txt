@@ -1,9 +1,0 @@
-{
-    errdata = "\27[01m\27[Ksrc/vol_arb/models/hybrid_model.cpp:\27[m\27[K In constructor ‘\27[01m\27[Kvol_arb::HMM_GJRGARCHModel::\27[01;32m\27[KHMM_GJRGARCHModel\27[m\27[K(int, const std::vector<vol_arb::MarketRegimeParams>&, double)\27[m\27[K’:\
-\27[01m\27[Ksrc/vol_arb/models/hybrid_model.cpp:19:40:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kstd::vector<vol_arb::MarketRegimeParams>::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} and ‘\27[01m\27[Kint\27[m\27[K’ [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
-   19 |         if (\27[01;35m\27[KinitialRegimeParams.size() != regimeCount\27[m\27[K) {\
-      |             \27[01;35m\27[K~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~\27[m\27[K\
-At global scope:\
-\27[01m\27[Kcc1plus:\27[m\27[K \27[01;36m\27[Knote: \27[m\27[Kunrecognized command-line option ‘\27[01m\27[K-Wno-gnu-line-marker\27[m\27[K’ may have been intended to silence earlier diagnostics\
-"
-}

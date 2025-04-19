@@ -12,8 +12,6 @@
  #include <array>
  #include <cmath>
  #include <algorithm>
- #include <cstring>  // For memcpy in bit manipulations
- #include <cstdint>  // For uint64_t type
  
  // Platform-specific headers for CPU feature detection
  #if defined(_MSC_VER)
@@ -29,147 +27,12 @@
  namespace opt {
  
  /**
-  * @brief SIMD support detection and CPU feature detection
-  */
- class SimdDetect {
- public:
-     /**
-      * @brief Check if AVX2 instructions are supported
-      * 
-      * @return True if AVX2 is supported, false otherwise
-      */
-     static bool hasAVX2() {
-         static const bool has_avx2 = checkAVX2Support();
-         return has_avx2;
-     }
-     
-     /**
-      * @brief Check if AVX-512 instructions are supported
-      * 
-      * @return True if AVX-512 is supported, false otherwise
-      */
-     static bool hasAVX512() {
-         static const bool has_avx512 = checkAVX512Support();
-         return has_avx512;
-     }
-     
- private:
-     static bool checkAVX2Support() {
-         // Cross-platform implementation of AVX2 detection
- #if defined(_MSC_VER)
-         // MSVC implementation
-         int cpuInfo[4];
-         int nIds = 0;
-         
-         __cpuidex(cpuInfo, 0, 0);
-         nIds = cpuInfo[0];
-         
-         bool avxSupported = false;
-         bool avx2Supported = false;
-         
-         if (nIds >= 1) {
-             __cpuidex(cpuInfo, 1, 0);
-             avxSupported = (cpuInfo[2] & (1 << 28)) != 0;  // Check for AVX
-         }
-         
-         if (nIds >= 7) {
-             __cpuidex(cpuInfo, 7, 0);
-             avx2Supported = (cpuInfo[1] & (1 << 5)) != 0;  // Check for AVX2
-         }
-         
-         return avxSupported && avx2Supported;
- #elif defined(__GNUC__) || defined(__clang__)
-         // GCC or Clang implementation
-         unsigned int eax, ebx, ecx, edx;
-         
-         // Check for basic CPUID support
-         if (__get_cpuid_max(0, nullptr) < 7) {
-             return false;
-         }
-         
-         // Check for AVX support (CPUID.1:ECX.AVX[bit 28])
-         __cpuid(1, eax, ebx, ecx, edx);
-         bool avxSupported = (ecx & (1 << 28)) != 0;
-         
-         // Check for AVX2 support (CPUID.7.0:EBX.AVX2[bit 5])
-         __cpuid_count(7, 0, eax, ebx, ecx, edx);
-         bool avx2Supported = (ebx & (1 << 5)) != 0;
-         
-         return avxSupported && avx2Supported;
- #else
-         // Fallback for other platforms - assume AVX2 is not available
-         return false;
- #endif
-     }
- 
-     static bool checkAVX512Support() {
-         // Cross-platform implementation of AVX-512 detection
- #if defined(_MSC_VER)
-         // MSVC implementation
-         int cpuInfo[4];
-         int nIds = 0;
-         
-         __cpuidex(cpuInfo, 0, 0);
-         nIds = cpuInfo[0];
-         
-         if (nIds >= 7) {
-             __cpuidex(cpuInfo, 7, 0);
-             // Check for AVX-512 Foundation
-             return (cpuInfo[1] & (1 << 16)) != 0;
-         }
-         
-         return false;
- #elif defined(__GNUC__) || defined(__clang__)
-         // GCC or Clang implementation
-         unsigned int eax, ebx, ecx, edx;
-         
-         // Check for basic CPUID support
-         if (__get_cpuid_max(0, nullptr) < 7) {
-             return false;
-         }
-         
-         // Check for AVX-512 Foundation (CPUID.7.0:EBX.AVX512F[bit 16])
-         __cpuid_count(7, 0, eax, ebx, ecx, edx);
-         return (ebx & (1 << 16)) != 0;
- #else
-         // Fallback for other platforms - assume AVX-512 is not available
-         return false;
- #endif
-     }
- };
- 
- /**
-  * @brief Check if SIMD optimization is available
-  * 
-  * @return True if SIMD optimization is available, false otherwise
-  */
- inline bool isSimdAvailable() {
-     return SimdDetect::hasAVX2();
- }
- 
- /**
-  * @brief Threshold for using SIMD operations
-  * 
-  * Only use SIMD for operations with size >= this threshold
-  */
- constexpr size_t SIMD_THRESHOLD = 32;
- 
- /**
-  * @brief Check if we should use SIMD for a given data size
-  * 
-  * @param size Size of the data to process
-  * @return True if SIMD should be used, false otherwise
-  */
- inline bool shouldUseSimd(size_t size) {
-     return isSimdAvailable() && size >= SIMD_THRESHOLD;
- }
- 
- /**
   * @class SimdOps
-  * @brief Optimized SIMD operations for financial math
+  * @brief SIMD operations for AVX2 (256-bit vectors)
   * 
-  * This class provides SIMD operations optimized for financial mathematics
-  * calculations with AVX2 instructions (256-bit vectors).
+  * This class provides SIMD operations for accelerating option pricing
+  * calculations using AVX2 instructions. All operations are designed
+  * for deterministic execution.
   */
  class SimdOps {
  public:
@@ -303,6 +166,44 @@
      }
      
      /**
+      * @brief Natural logarithm of a vector
+      * 
+      * @param x Input vector
+      * @return Vector containing log(x)
+      */
+     static inline __m256d log(__m256d x) {
+         // AVX2 doesn't have a direct log function, use scalar computation
+         std::array<double, 4> values;
+         store(values, x);
+         
+         values[0] = std::log(values[0]);
+         values[1] = std::log(values[1]);
+         values[2] = std::log(values[2]);
+         values[3] = std::log(values[3]);
+         
+         return load(values);
+     }
+     
+     /**
+      * @brief Exponential function of a vector
+      * 
+      * @param x Input vector
+      * @return Vector containing exp(x)
+      */
+     static inline __m256d exp(__m256d x) {
+         // AVX2 doesn't have a direct exp function, use scalar computation
+         std::array<double, 4> values;
+         store(values, x);
+         
+         values[0] = std::exp(values[0]);
+         values[1] = std::exp(values[1]);
+         values[2] = std::exp(values[2]);
+         values[3] = std::exp(values[3]);
+         
+         return load(values);
+     }
+     
+     /**
       * @brief Square root of a vector
       * 
       * @param x Input vector
@@ -311,142 +212,52 @@
      static inline __m256d sqrt(__m256d x) {
          return _mm256_sqrt_pd(x);
      }
- 
-     /**
-      * @brief Fast polynomial approximation of exp(x) using AVX2
-      * 
-      * Much faster than per-element scalar computation with very good accuracy.
-      * 
-      * @param x Input vector
-      * @return Vector containing exp(x)
-      */
-     static inline __m256d fast_exp(__m256d x) {
-         // Constants for polynomial approximation
-         const __m256d LOG2E = _mm256_set1_pd(1.4426950408889634);
-         const __m256d LN2 = _mm256_set1_pd(0.6931471805599453);
-         const __m256d ONE = _mm256_set1_pd(1.0);
-         const __m256d C1 = _mm256_set1_pd(1.0);
-         const __m256d C2 = _mm256_set1_pd(0.5);
-         const __m256d C3 = _mm256_set1_pd(0.1666666666666667);
-         const __m256d C4 = _mm256_set1_pd(0.041666666666666664);
-         const __m256d C5 = _mm256_set1_pd(0.008333333333333333);
-         
-         // Apply range reduction: exp(x) = 2^i * exp(f) where i = floor(x/ln(2)), f = x - i*ln(2)
-         __m256d tx = _mm256_mul_pd(x, LOG2E);
-         __m256d ti = _mm256_floor_pd(tx);
-         __m256d tf = _mm256_sub_pd(x, _mm256_mul_pd(ti, LN2));
-         
-         // Compute polynomial approximation of exp(f)
-         __m256d result = ONE;
-         result = _mm256_add_pd(result, _mm256_mul_pd(C1, tf));
-         __m256d tf2 = _mm256_mul_pd(tf, tf);
-         result = _mm256_add_pd(result, _mm256_mul_pd(C2, tf2));
-         __m256d tf3 = _mm256_mul_pd(tf2, tf);
-         result = _mm256_add_pd(result, _mm256_mul_pd(C3, tf3));
-         __m256d tf4 = _mm256_mul_pd(tf3, tf);
-         result = _mm256_add_pd(result, _mm256_mul_pd(C4, tf4));
-         __m256d tf5 = _mm256_mul_pd(tf4, tf);
-         result = _mm256_add_pd(result, _mm256_mul_pd(C5, tf5));
-         
-         // Scale by 2^i using scalar operations for simplicity and reliability
-         alignas(32) double int_parts[4];
-         alignas(32) double result_array[4];
-         _mm256_store_pd(int_parts, ti);  // Store the integer parts
-         _mm256_store_pd(result_array, result);  // Store the polynomial result
-         
-         for (int i = 0; i < 4; i++) {
-             int exp = (int)int_parts[i] + 1023;  // IEEE-754 exponent bias
-             exp = std::min(std::max(exp, 0), 2046);  // Clamp to valid range
-             uint64_t bits = (uint64_t)exp << 52;
-             double scale;
-             memcpy(&scale, &bits, sizeof(double));
-             result_array[i] *= scale;
-         }
-         
-         return _mm256_load_pd(result_array);
-     }
      
      /**
-      * @brief Fast approximation of erf(x) using polynomial
-      * 
-      * Abramowitz and Stegun approximation (error < 5e-4)
+      * @brief Error function of a vector
       * 
       * @param x Input vector
       * @return Vector containing erf(x)
       */
-     static inline __m256d fast_erf(__m256d x) {
-         const __m256d ONE = _mm256_set1_pd(1.0);
-         const __m256d NEG_ONE = _mm256_set1_pd(-1.0);
+     static inline __m256d erf(__m256d x) {
+         // AVX2 doesn't have a direct erf function, use scalar computation
+         std::array<double, 4> values;
+         store(values, x);
          
-         // Get absolute value and sign
-         __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x);
-         __m256d sign_x = _mm256_and_pd(x, _mm256_set1_pd(-0.0));
-         sign_x = _mm256_or_pd(sign_x, ONE);  // sign(x) as +1.0 or -1.0
+         values[0] = std::erf(values[0]);
+         values[1] = std::erf(values[1]);
+         values[2] = std::erf(values[2]);
+         values[3] = std::erf(values[3]);
          
-         // Constants for approximation
-         const __m256d a1 = _mm256_set1_pd(0.254829592);
-         const __m256d a2 = _mm256_set1_pd(-0.284496736);
-         const __m256d a3 = _mm256_set1_pd(1.421413741);
-         const __m256d a4 = _mm256_set1_pd(-1.453152027);
-         const __m256d a5 = _mm256_set1_pd(1.061405429);
-         const __m256d p = _mm256_set1_pd(0.3275911);
-         
-         // t = 1.0 / (1.0 + p * |x|)
-         __m256d t = _mm256_div_pd(ONE, _mm256_add_pd(ONE, _mm256_mul_pd(p, abs_x)));
-         
-         // Polynomial approximation
-         __m256d result = a5;
-         result = _mm256_add_pd(_mm256_mul_pd(result, t), a4);
-         result = _mm256_add_pd(_mm256_mul_pd(result, t), a3);
-         result = _mm256_add_pd(_mm256_mul_pd(result, t), a2);
-         result = _mm256_add_pd(_mm256_mul_pd(result, t), a1);
-         result = _mm256_mul_pd(result, t);
-         
-         // erf(x) = sign(x) * (1 - exp(-x^2) * polynomial)
-         __m256d x_squared = _mm256_mul_pd(x, x);
-         __m256d neg_x_squared = _mm256_mul_pd(NEG_ONE, x_squared);
-         __m256d exp_term = fast_exp(neg_x_squared);
-         result = _mm256_mul_pd(exp_term, result);
-         result = _mm256_sub_pd(ONE, result);
-         
-         // Apply sign
-         return _mm256_mul_pd(sign_x, result);
+         return load(values);
      }
- 
+     
      /**
-      * @brief Fast normal CDF calculation using fast_erf
+      * @brief Normal CDF of a vector
       * 
       * @param x Input vector
       * @return Vector containing normalCDF(x)
       */
      static inline __m256d normalCDF(__m256d x) {
-         const __m256d HALF = _mm256_set1_pd(0.5);
-         const __m256d ONE = _mm256_set1_pd(1.0);
-         const __m256d SQRT_2_INV = _mm256_set1_pd(1.0 / std::sqrt(2.0));
+         __m256d half = set1(0.5);
+         __m256d sqrt2inv = set1(1.0 / std::sqrt(2.0));
          
-         // normalCDF(x) = 0.5 * (1 + erf(x/sqrt(2)))
-         __m256d scaled_x = _mm256_mul_pd(x, SQRT_2_INV);
-         __m256d erf_term = fast_erf(scaled_x);
-         __m256d term1 = _mm256_add_pd(ONE, erf_term);
-         return _mm256_mul_pd(HALF, term1);
+         // normalCDF(x) = 0.5 * (1 + erf(x / sqrt(2)))
+         return add(half, mul(half, erf(mul(x, sqrt2inv))));
      }
      
      /**
-      * @brief Fast normal PDF calculation
+      * @brief Normal PDF of a vector
       * 
       * @param x Input vector
       * @return Vector containing normalPDF(x)
       */
      static inline __m256d normalPDF(__m256d x) {
-         const __m256d NEG_HALF = _mm256_set1_pd(-0.5);
-         const __m256d INV_SQRT_2PI = _mm256_set1_pd(1.0 / std::sqrt(2.0 * M_PI));
+         __m256d minusHalf = set1(-0.5);
+         __m256d invSqrt2Pi = set1(1.0 / std::sqrt(2.0 * M_PI));
          
-         // normalPDF(x) = exp(-0.5 * x^2) / sqrt(2*PI)
-         __m256d x_squared = _mm256_mul_pd(x, x);
-         __m256d exponent = _mm256_mul_pd(NEG_HALF, x_squared);
-         __m256d exp_term = fast_exp(exponent);
-         
-         return _mm256_mul_pd(exp_term, INV_SQRT_2PI);
+         // normalPDF(x) = exp(-0.5 * x^2) / sqrt(2 * PI)
+         return mul(exp(mul(minusHalf, mul(x, x))), invSqrt2Pi);
      }
      
      /**
@@ -461,33 +272,17 @@
       * @return Vector containing d1 values
       */
      static inline __m256d bsD1(__m256d S, __m256d K, __m256d r, __m256d q, __m256d vol, __m256d T) {
-         // Prepare intermediate values
-         __m256d vol_sqrt_T = _mm256_mul_pd(vol, _mm256_sqrt_pd(T));
-         __m256d half = _mm256_set1_pd(0.5);
-         __m256d vol_squared = _mm256_mul_pd(vol, vol);
-         __m256d half_vol_squared = _mm256_mul_pd(half, vol_squared);
+         __m256d vol_sqrt_T = mul(vol, sqrt(T));
+         __m256d half_vol_squared = mul(set1(0.5), mul(vol, vol));
          
-         // Calculate S/K and get log
-         __m256d S_div_K = _mm256_div_pd(S, K);
-         
-         // For log, we need to use a temporary array
-         alignas(32) double values[4];
-         _mm256_store_pd(values, S_div_K);
-         
-         for (int i = 0; i < 4; i++) {
-             values[i] = std::log(values[i]);
-         }
-         
-         __m256d log_S_div_K = _mm256_load_pd(values);
-         
-         // Calculate drift term
-         __m256d r_minus_q = _mm256_sub_pd(r, q);
-         __m256d drift = _mm256_add_pd(r_minus_q, half_vol_squared);
-         __m256d drift_T = _mm256_mul_pd(drift, T);
-         
-         // Combine terms and calculate d1
-         __m256d numerator = _mm256_add_pd(log_S_div_K, drift_T);
-         return _mm256_div_pd(numerator, vol_sqrt_T);
+         // d1 = (ln(S/K) + (r - q + 0.5 * vol^2) * T) / (vol * sqrt(T))
+         return div(
+             add(
+                 log(div(S, K)),
+                 mul(add(sub(r, q), half_vol_squared), T)
+             ),
+             vol_sqrt_T
+         );
      }
      
      /**
@@ -500,8 +295,7 @@
       */
      static inline __m256d bsD2(__m256d d1, __m256d vol, __m256d T) {
          // d2 = d1 - vol * sqrt(T)
-         __m256d vol_sqrt_T = _mm256_mul_pd(vol, _mm256_sqrt_pd(T));
-         return _mm256_sub_pd(d1, vol_sqrt_T);
+         return sub(d1, mul(vol, sqrt(T)));
      }
      
      /**
@@ -516,36 +310,43 @@
       * @return Vector containing put option prices
       */
      static inline __m256d bsPut(__m256d S, __m256d K, __m256d r, __m256d q, __m256d vol, __m256d T) {
-         __m256d zero = _mm256_set1_pd(0.0);
+         __m256d zero = set1(0.0);
          
-         // Calculate d1 and d2
+         // Handle degenerate cases
+         __m256d vol_mask = _mm256_cmp_pd(vol, zero, _CMP_GT_OQ);
+         __m256d T_mask = _mm256_cmp_pd(T, zero, _CMP_GT_OQ);
+         __m256d valid_mask = _mm256_and_pd(vol_mask, T_mask);
+         
+         if (_mm256_movemask_pd(valid_mask) == 0) {
+             // All elements are degenerate, return max(0, K-S)
+             return max(zero, sub(K, S));
+         }
+         
          __m256d d1 = bsD1(S, K, r, q, vol, T);
          __m256d d2 = bsD2(d1, vol, T);
          
-         // Negate d1 and d2 for put calculation
-         __m256d neg_d1 = _mm256_sub_pd(zero, d1);
-         __m256d neg_d2 = _mm256_sub_pd(zero, d2);
+         // Negative d1 and d2 for put calculation
+         __m256d neg_d1 = sub(zero, d1);
+         __m256d neg_d2 = sub(zero, d2);
          
-         // Calculate N(-d1) and N(-d2)
+         // N(-d1) and N(-d2)
          __m256d Nd1 = normalCDF(neg_d1);
          __m256d Nd2 = normalCDF(neg_d2);
          
-         // Calculate discount factors
-         __m256d neg_r_T = _mm256_mul_pd(_mm256_sub_pd(zero, r), T);
-         __m256d neg_q_T = _mm256_mul_pd(_mm256_sub_pd(zero, q), T);
-         __m256d dr = fast_exp(neg_r_T);
-         __m256d dq = fast_exp(neg_q_T);
-         
-         // K * e^(-rT) * N(-d2)
-         __m256d term1 = _mm256_mul_pd(K, dr);
-         term1 = _mm256_mul_pd(term1, Nd2);
-         
-         // S * e^(-qT) * N(-d1)
-         __m256d term2 = _mm256_mul_pd(S, dq);
-         term2 = _mm256_mul_pd(term2, Nd1);
+         // discount factors
+         __m256d dr = exp(mul(sub(zero, r), T));
+         __m256d dq = exp(mul(sub(zero, q), T));
          
          // put = K * e^(-rT) * N(-d2) - S * e^(-qT) * N(-d1)
-         return _mm256_sub_pd(term1, term2);
+         __m256d put_value = sub(
+             mul(mul(K, dr), Nd2),
+             mul(mul(S, dq), Nd1)
+         );
+         
+         // For degenerate cases, use max(0, K-S)
+         __m256d intrinsic = max(zero, sub(K, S));
+         
+         return _mm256_blendv_pd(intrinsic, put_value, valid_mask);
      }
      
      /**
@@ -560,32 +361,39 @@
       * @return Vector containing call option prices
       */
      static inline __m256d bsCall(__m256d S, __m256d K, __m256d r, __m256d q, __m256d vol, __m256d T) {
-         __m256d zero = _mm256_set1_pd(0.0);
+         __m256d zero = set1(0.0);
          
-         // Calculate d1 and d2
+         // Handle degenerate cases
+         __m256d vol_mask = _mm256_cmp_pd(vol, zero, _CMP_GT_OQ);
+         __m256d T_mask = _mm256_cmp_pd(T, zero, _CMP_GT_OQ);
+         __m256d valid_mask = _mm256_and_pd(vol_mask, T_mask);
+         
+         if (_mm256_movemask_pd(valid_mask) == 0) {
+             // All elements are degenerate, return max(0, S-K)
+             return max(zero, sub(S, K));
+         }
+         
          __m256d d1 = bsD1(S, K, r, q, vol, T);
          __m256d d2 = bsD2(d1, vol, T);
          
-         // Calculate N(d1) and N(d2)
+         // N(d1) and N(d2)
          __m256d Nd1 = normalCDF(d1);
          __m256d Nd2 = normalCDF(d2);
          
-         // Calculate discount factors
-         __m256d neg_r_T = _mm256_mul_pd(_mm256_sub_pd(zero, r), T);
-         __m256d neg_q_T = _mm256_mul_pd(_mm256_sub_pd(zero, q), T);
-         __m256d dr = fast_exp(neg_r_T);
-         __m256d dq = fast_exp(neg_q_T);
-         
-         // S * e^(-qT) * N(d1)
-         __m256d term1 = _mm256_mul_pd(S, dq);
-         term1 = _mm256_mul_pd(term1, Nd1);
-         
-         // K * e^(-rT) * N(d2)
-         __m256d term2 = _mm256_mul_pd(K, dr);
-         term2 = _mm256_mul_pd(term2, Nd2);
+         // discount factors
+         __m256d dr = exp(mul(sub(zero, r), T));
+         __m256d dq = exp(mul(sub(zero, q), T));
          
          // call = S * e^(-qT) * N(d1) - K * e^(-rT) * N(d2)
-         return _mm256_sub_pd(term1, term2);
+         __m256d call_value = sub(
+             mul(mul(S, dq), Nd1),
+             mul(mul(K, dr), Nd2)
+         );
+         
+         // For degenerate cases, use max(0, S-K)
+         __m256d intrinsic = max(zero, sub(S, K));
+         
+         return _mm256_blendv_pd(intrinsic, call_value, valid_mask);
      }
      
      /**
@@ -596,8 +404,8 @@
       * @return Extracted element
       */
      static inline double extract(__m256d vec, int index) {
-         alignas(32) double values[4];
-         _mm256_store_pd(values, vec);
+         std::array<double, 4> values;
+         store(values, vec);
          return values[index];
      }
      
@@ -608,17 +416,134 @@
       * @return Sum of all elements
       */
      static inline double sum(__m256d vec) {
-         // Sum the elements using horizontal adds
+         // Sum the elements of the vector
          __m128d low = _mm256_extractf128_pd(vec, 0);
          __m128d high = _mm256_extractf128_pd(vec, 1);
          __m128d sum_128 = _mm_add_pd(low, high);
-         
-         // Extract the result
-         alignas(16) double sum_values[2];
-         _mm_store_pd(sum_values, sum_128);
+         double sum_values[2];
+         _mm_storeu_pd(sum_values, sum_128);
          return sum_values[0] + sum_values[1];
      }
  };
+ 
+ /**
+  * @brief SIMD support detection and CPU feature detection
+  */
+ class SimdDetect {
+ public:
+     /**
+      * @brief Check if AVX2 instructions are supported
+      * 
+      * @return True if AVX2 is supported, false otherwise
+      */
+     static bool hasAVX2() {
+         static const bool has_avx2 = checkAVX2Support();
+         return has_avx2;
+     }
+     
+     /**
+      * @brief Check if AVX-512 instructions are supported
+      * 
+      * @return True if AVX-512 is supported, false otherwise
+      */
+     static bool hasAVX512() {
+         static const bool has_avx512 = checkAVX512Support();
+         return has_avx512;
+     }
+     
+ private:
+     static bool checkAVX2Support() {
+         // Cross-platform implementation of AVX2 detection
+ #if defined(_MSC_VER)
+         // MSVC implementation
+         int cpuInfo[4];
+         int nIds = 0;
+         
+         __cpuidex(cpuInfo, 0, 0);
+         nIds = cpuInfo[0];
+         
+         bool avxSupported = false;
+         bool avx2Supported = false;
+         
+         if (nIds >= 1) {
+             __cpuidex(cpuInfo, 1, 0);
+             avxSupported = (cpuInfo[2] & (1 << 28)) != 0;  // Check for AVX
+         }
+         
+         if (nIds >= 7) {
+             __cpuidex(cpuInfo, 7, 0);
+             avx2Supported = (cpuInfo[1] & (1 << 5)) != 0;  // Check for AVX2
+         }
+         
+         return avxSupported && avx2Supported;
+ #elif defined(__GNUC__) || defined(__clang__)
+         // GCC or Clang implementation
+         unsigned int eax, ebx, ecx, edx;
+         
+         // Check for basic CPUID support
+         if (__get_cpuid_max(0, nullptr) < 7) {
+             return false;
+         }
+         
+         // Check for AVX support (CPUID.1:ECX.AVX[bit 28])
+         __cpuid(1, eax, ebx, ecx, edx);
+         bool avxSupported = (ecx & (1 << 28)) != 0;
+         
+         // Check for AVX2 support (CPUID.7.0:EBX.AVX2[bit 5])
+         __cpuid_count(7, 0, eax, ebx, ecx, edx);
+         bool avx2Supported = (ebx & (1 << 5)) != 0;
+         
+         return avxSupported && avx2Supported;
+ #else
+         // Fallback for other platforms - assume AVX2 is not available
+         return false;
+ #endif
+     }
+ 
+     static bool checkAVX512Support() {
+         // Cross-platform implementation of AVX-512 detection
+ #if defined(_MSC_VER)
+         // MSVC implementation
+         int cpuInfo[4];
+         int nIds = 0;
+         
+         __cpuidex(cpuInfo, 0, 0);
+         nIds = cpuInfo[0];
+         
+         if (nIds >= 7) {
+             __cpuidex(cpuInfo, 7, 0);
+             // Check for AVX-512 Foundation
+             return (cpuInfo[1] & (1 << 16)) != 0;
+         }
+         
+         return false;
+ #elif defined(__GNUC__) || defined(__clang__)
+         // GCC or Clang implementation
+         unsigned int eax, ebx, ecx, edx;
+         
+         // Check for basic CPUID support
+         if (__get_cpuid_max(0, nullptr) < 7) {
+             return false;
+         }
+         
+         // Check for AVX-512 Foundation (CPUID.7.0:EBX.AVX512F[bit 16])
+         __cpuid_count(7, 0, eax, ebx, ecx, edx);
+         return (ebx & (1 << 16)) != 0;
+ #else
+         // Fallback for other platforms - assume AVX-512 is not available
+         return false;
+ #endif
+     }
+ };
+ 
+ /**
+  * @brief Check if SIMD optimization is available
+  * 
+  * @return True if SIMD optimization is available, false otherwise
+  */
+ inline bool isSimdAvailable() {
+     return SimdDetect::hasAVX2();
+ }
  
  } // namespace opt
  } // namespace alo
