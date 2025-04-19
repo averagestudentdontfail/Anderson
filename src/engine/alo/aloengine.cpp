@@ -364,61 +364,92 @@ std::vector<double> ALOEngine::batchCalculatePut(double S, const std::vector<dou
     // Check for European-only condition once (r <= 0.0 && r <= q)
     bool use_european = (r <= 0.0 && r <= q);
     
-    // Use direct Black-Scholes for European options
-    if (use_european) {
-        for (size_t i = 0; i < n; ++i) {
-            results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
-        }
-        return results;
-    }
-    
-    // For very small batches, just use scalar computation
+    // Strategy 1: For very small batches, use scalar computation
     if (n <= 4) {
-        for (size_t i = 0; i < n; ++i) {
-            results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
-        }
-        return results;
-    }
-    
-    // For American options, process in larger chunks to amortize setup costs
-    constexpr size_t CHUNK_SIZE = 64;
-    
-    // Pre-allocate parameter arrays for vectorized processing
-    std::vector<double> S_vec(CHUNK_SIZE, S);
-    std::vector<double> r_vec(CHUNK_SIZE, r);
-    std::vector<double> q_vec(CHUNK_SIZE, q);
-    std::vector<double> vol_vec(CHUNK_SIZE, vol);
-    std::vector<double> T_vec(CHUNK_SIZE, T);
-    std::vector<double> chunk_results(CHUNK_SIZE);
-    
-    // Process in chunks
-    for (size_t start = 0; start < n; start += CHUNK_SIZE) {
-        const size_t end = std::min(start + CHUNK_SIZE, n);
-        const size_t chunk_size = end - start;
-        
-        // For small remaining chunks, use scalar processing
-        if (chunk_size < 8) {
-            for (size_t i = start; i < end; ++i) {
+        if (use_european) {
+            for (size_t i = 0; i < n; ++i) {
+                results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
+            }
+        } else {
+            for (size_t i = 0; i < n; ++i) {
                 results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
             }
-            continue;
         }
-        
-        // Copy strike prices to a contiguous buffer
-        std::vector<double> chunk_strikes(chunk_size);
-        std::copy(strikes.begin() + start, strikes.begin() + end, chunk_strikes.begin());
-        
-        // Use vectorized processing for this chunk
-        processAmericanPutChunk(S_vec.data(), chunk_strikes.data(), r_vec.data(), 
-                               q_vec.data(), vol_vec.data(), T_vec.data(), 
-                               chunk_results.data(), chunk_size);
-        
-        // Copy results back
-        std::copy(chunk_results.begin(), chunk_results.begin() + chunk_size, 
-                 results.begin() + start);
+        return results;
     }
     
-    return results;
+    // Strategy 2: For small-to-medium batches, use SIMD
+    if (n <= 64) {
+        // European options are easier to vectorize efficiently
+        if (use_european) {
+            constexpr size_t VECTOR_SIZE = 4;
+            size_t i = 0;
+            
+            // Process in groups of 4 using SIMD
+            for (; i + VECTOR_SIZE - 1 < n; i += VECTOR_SIZE) {
+                std::array<double, VECTOR_SIZE> K_batch = {
+                    strikes[i], strikes[i+1], strikes[i+2], strikes[i+3]
+                };
+                std::array<double, VECTOR_SIZE> S_batch = {S, S, S, S};
+                std::array<double, VECTOR_SIZE> r_batch = {r, r, r, r};
+                std::array<double, VECTOR_SIZE> q_batch = {q, q, q, q};
+                std::array<double, VECTOR_SIZE> vol_batch = {vol, vol, vol, vol};
+                std::array<double, VECTOR_SIZE> T_batch = {T, T, T, T};
+                std::array<double, VECTOR_SIZE> result_batch;
+                
+                // Use optimized vectorized Black-Scholes
+                opt::VectorMath::bsPut(
+                    S_batch.data(), K_batch.data(), r_batch.data(), q_batch.data(),
+                    vol_batch.data(), T_batch.data(), result_batch.data(), VECTOR_SIZE
+                );
+                
+                // Copy results back
+                for (size_t j = 0; j < VECTOR_SIZE; ++j) {
+                    results[i + j] = result_batch[j];
+                }
+            }
+            
+            // Handle remaining options
+            for (; i < n; ++i) {
+                results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
+            }
+        } 
+        else {
+            // For American options, use the calculatePut4 method for groups of 4
+            constexpr size_t VECTOR_SIZE = 4;
+            size_t i = 0;
+            
+            // Process in groups of 4
+            for (; i + VECTOR_SIZE - 1 < n; i += VECTOR_SIZE) {
+                std::array<double, VECTOR_SIZE> strike_batch = {
+                    strikes[i], strikes[i+1], strikes[i+2], strikes[i+3]
+                };
+                
+                // Use optimized batch American put calculation
+                auto result_batch = calculatePut4(S, strike_batch, r, q, vol, T);
+                
+                // Copy results back
+                for (size_t j = 0; j < VECTOR_SIZE; ++j) {
+                    results[i + j] = result_batch[j];
+                }
+            }
+            
+            // Handle remaining options individually
+            for (; i < n; ++i) {
+                results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
+            }
+        }
+        
+        return results;
+    }
+    
+    // Strategy 3: For larger batches (> 64), use parallelized implementation
+    // Process in larger chunks to amortize thread scheduling costs
+    if (n > 64) {
+        return parallelBatchCalculatePut(S, strikes, r, q, vol, T);
+    }
+    
+    return results; // Should never reach here, but added for safety
 }
  
 std::vector<double> ALOEngine::batchCalculatePut(double S, 
@@ -538,11 +569,12 @@ std::array<double, 4> ALOEngine::calculatePut4(
     
     // Check for European-only condition once
     if (r <= 0.0 && r <= q) {
-        // Use direct Black-Scholes for all options
+        // Use vectorized Black-Scholes for European options
         std::array<double, 4> results;
-        for (size_t i = 0; i < 4; ++i) {
-            results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
-        }
+        opt::VectorMath::bsPut(
+            spots.data(), strikes.data(), rs.data(), qs.data(), 
+            vols.data(), Ts.data(), results.data(), 4
+        );
         return results;
     }
     
@@ -580,86 +612,104 @@ std::vector<double> ALOEngine::batchCalculateCall(double S, const std::vector<do
  
 std::vector<double> ALOEngine::parallelBatchCalculatePut(double S, const std::vector<double>& strikes,
                                                      double r, double q, double vol, double T) const {
-    // Return empty vector for empty input
-    if (strikes.empty()) {
-        return {};
-    }
-    
-    std::vector<double> results(strikes.size());
     const size_t n = strikes.size();
+    if (n == 0) return {};
     
-    // For small batches, use the regular batch calculation
-    if (n <= 100) {
+    // For small batches, use the regular calculation to avoid thread overhead
+    if (n <= 64) {
         return batchCalculatePut(S, strikes, r, q, vol, T);
     }
     
-    // Check for European-only condition
+    // Allocate result space
+    std::vector<double> results(n);
+    
+    // Determine European-only condition once
     bool use_european = (r <= 0.0 && r <= q);
     
-    if (use_european) {
-        // For European options, parallelize Black-Scholes directly
-        const unsigned int num_cores = std::thread::hardware_concurrency();
-        const unsigned int num_threads = std::max(1u, num_cores - 1);
-        const size_t chunk_size = std::max(size_t(16), n / num_threads);
-        
-        std::vector<std::future<void>> futures;
-        
-        for (size_t start = 0; start < n; start += chunk_size) {
-            const size_t end = std::min(start + chunk_size, n);
-            
-            futures.push_back(std::async(std::launch::async, 
-                [this, &results, S, &strikes, r, q, vol, T, start, end]() {
-                    for (size_t i = start; i < end; ++i) {
-                        results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
-                    }
-                }
-            ));
-        }
-        
-        // Wait for all futures to complete
-        for (auto& future : futures) {
-            future.wait();
-        }
-        
-        return results;
-    }
-    
-    // For larger batches with American options, use parallel processing
+    // Get thread pool
+    auto& pool = get_worker_pool();
     const unsigned int num_cores = std::thread::hardware_concurrency();
-    const unsigned int num_threads = std::max(1u, num_cores - 1);  // Leave one core free for system
     
-    // Calculate chunk size, ensuring each thread processes at least 16 options
-    const size_t min_chunk_size = 16;
-    const size_t chunk_size = std::max(min_chunk_size, n / num_threads);
+    // Calculate chunk size to minimize scheduling overhead
+    // Using a hybrid approach: more chunks than cores for better load balancing
+    const unsigned int num_chunks = std::min(static_cast<unsigned int>(n), num_cores * 2);
+    const size_t chunk_size = (n + num_chunks - 1) / num_chunks; // ceiling division
     
-    // Create futures for parallel processing
-    std::vector<std::future<void>> futures;
+    // Submit tasks to thread pool with deterministic behavior
+    std::atomic<size_t> completed_chunks(0);
+    const size_t total_chunks = (n + chunk_size - 1) / chunk_size;
     
-    // Process in chunks
     for (size_t start = 0; start < n; start += chunk_size) {
         const size_t end = std::min(start + chunk_size, n);
         
-        futures.push_back(std::async(std::launch::async, 
-            [this, &results, S, &strikes, r, q, vol, T, start, end]() {
-                // Check if we should use batch processing for this chunk
-                if (end - start >= 8) {
-                    std::vector<double> chunk_strikes(strikes.begin() + start, strikes.begin() + end);
-                    auto chunk_results = batchCalculatePut(S, chunk_strikes, r, q, vol, T);
-                    std::copy(chunk_results.begin(), chunk_results.end(), results.begin() + start);
-                } else {
-                    // For small chunks, use scalar
-                    for (size_t i = start; i < end; ++i) {
-                        results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
+        pool.enqueue([this, &results, &completed_chunks, S, &strikes, r, q, vol, T, use_european, start, end]() {
+            // Process this chunk with bounded execution time
+            if (use_european) {
+                // Fast path for European options - use vectorized Black-Scholes
+                constexpr size_t VECTOR_SIZE = 4;
+                size_t i = start;
+                
+                // Process in groups of 4 using SIMD
+                for (; i + VECTOR_SIZE - 1 < end; i += VECTOR_SIZE) {
+                    std::array<double, VECTOR_SIZE> K_batch = {
+                        strikes[i], strikes[i+1], strikes[i+2], strikes[i+3]
+                    };
+                    std::array<double, VECTOR_SIZE> S_batch = {S, S, S, S};
+                    std::array<double, VECTOR_SIZE> r_batch = {r, r, r, r};
+                    std::array<double, VECTOR_SIZE> q_batch = {q, q, q, q};
+                    std::array<double, VECTOR_SIZE> vol_batch = {vol, vol, vol, vol};
+                    std::array<double, VECTOR_SIZE> T_batch = {T, T, T, T};
+                    std::array<double, VECTOR_SIZE> result_batch;
+                    
+                    // Use optimized vectorized Black-Scholes
+                    opt::VectorMath::bsPut(
+                        S_batch.data(), K_batch.data(), r_batch.data(), q_batch.data(),
+                        vol_batch.data(), T_batch.data(), result_batch.data(), VECTOR_SIZE
+                    );
+                    
+                    // Copy results back
+                    for (size_t j = 0; j < VECTOR_SIZE; ++j) {
+                        results[i + j] = result_batch[j];
                     }
                 }
+                
+                // Handle remaining options individually
+                for (; i < end; ++i) {
+                    results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
+                }
+            } else {
+                // For American options, again process in batches of 4 for SIMD efficiency
+                constexpr size_t VECTOR_SIZE = 4;
+                size_t i = start;
+                
+                // Process in groups of 4
+                for (; i + VECTOR_SIZE - 1 < end; i += VECTOR_SIZE) {
+                    std::array<double, VECTOR_SIZE> strike_batch = {
+                        strikes[i], strikes[i+1], strikes[i+2], strikes[i+3]
+                    };
+                    
+                    // Use optimized batch American put calculation
+                    auto result_batch = calculatePut4(S, strike_batch, r, q, vol, T);
+                    
+                    // Copy results back
+                    for (size_t j = 0; j < VECTOR_SIZE; ++j) {
+                        results[i + j] = result_batch[j];
+                    }
+                }
+                
+                // Handle remaining options individually
+                for (; i < end; ++i) {
+                    results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
+                }
             }
-        ));
+            
+            // Increment completed chunks counter
+            completed_chunks.fetch_add(1);
+        });
     }
     
-    // Wait for all futures to complete
-    for (auto& future : futures) {
-        future.wait();
-    }
+    // Wait for all tasks to complete
+    pool.wait_all();
     
     return results;
 }
