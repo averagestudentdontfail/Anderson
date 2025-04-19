@@ -1,0 +1,9 @@
+{
+    errdata = "\27[01m\27[Ksrc/engine/determine/jourman.cpp:\27[m\27[K In member function ‘\27[01m\27[Kvoid engine::determine::JournalReplayEngine::\27[01;32m\27[KreplayThreadFunc\27[m\27[K()\27[m\27[K’:\
+\27[01m\27[Ksrc/engine/determine/jourman.cpp:391:10:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kvariable ‘\27[01m\27[KreplayStartTime\27[m\27[K’ set but not used [\27[01;35m\27[K-Wunused-but-set-variable\27[m\27[K]\
+  391 |     auto \27[01;35m\27[KreplayStartTime\27[m\27[K = std::chrono::high_resolution_clock::now();\
+      |          \27[01;35m\27[K^~~~~~~~~~~~~~~\27[m\27[K\
+At global scope:\
+\27[01m\27[Kcc1plus:\27[m\27[K \27[01;36m\27[Knote: \27[m\27[Kunrecognized command-line option ‘\27[01m\27[K-Wno-gnu-line-marker\27[m\27[K’ may have been intended to silence earlier diagnostics\
+"
+}

@@ -1,0 +1,33 @@
+{
+    errdata = "\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:\27[m\27[K In member function ‘\27[01m\27[Kvoid vol_arb::EmissionDistribution::\27[01;32m\27[KsetGaussianMixtureParameters\27[m\27[K(const std::vector<Eigen::Matrix<double, -1, 1> >&, const std::vector<Eigen::Matrix<double, -1, -1> >&, const vol_arb::Vector&)\27[m\27[K’:\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:82:60:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kstd::vector<Eigen::Matrix<double, -1, 1> >::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} and ‘\27[01m\27[KEigen::EigenBase<Eigen::Matrix<double, -1, 1> >::Index\27[m\27[K’ {aka ‘\27[01m\27[Klong int\27[m\27[K’} [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+   82 |     if (means.size() != covariances.size() || \27[01;35m\27[Kmeans.size() != weights.size()\27[m\27[K) {\
+      |                                               \27[01;35m\27[K~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~\27[m\27[K\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:\27[m\27[K In member function ‘\27[01m\27[Kvol_arb::Vector vol_arb::EmissionDistribution::\27[01;32m\27[Ksample\27[m\27[K(std::mt19937&) const\27[m\27[K’:\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:216:34:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Ksize_t\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} and ‘\27[01m\27[KEigen::EigenBase<Eigen::Matrix<double, -1, 1> >::Index\27[m\27[K’ {aka ‘\27[01m\27[Klong int\27[m\27[K’} [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+  216 |             for (size_t i = 0; \27[01;35m\27[Ki < mixtureWeights_.size()\27[m\27[K; ++i) {\
+      |                                \27[01;35m\27[K~~^~~~~~~~~~~~~~~~~~~~~~~~\27[m\27[K\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:\27[m\27[K In member function ‘\27[01m\27[Kvoid vol_arb::HiddenMarkovModel::\27[01;32m\27[KsetEmissionDistributions\27[m\27[K(const std::vector<vol_arb::EmissionDistribution>&)\27[m\27[K’:\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:454:30:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kstd::vector<vol_arb::EmissionDistribution>::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} and ‘\27[01m\27[Kint\27[m\27[K’ [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+  454 |     if (\27[01;35m\27[Kdistributions.size() != numStates_\27[m\27[K) {\
+      |         \27[01;35m\27[K~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~\27[m\27[K\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:\27[m\27[K In member function ‘\27[01m\27[Kvoid vol_arb::HiddenMarkovModel::\27[01;32m\27[KsetRegimeNames\27[m\27[K(const std::vector<std::__cxx11::basic_string<char> >&)\27[m\27[K’:\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:877:22:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kstd::vector<std::__cxx11::basic_string<char> >::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} and ‘\27[01m\27[Kint\27[m\27[K’ [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+  877 |     if (\27[01;35m\27[Knames.size() != numStates_\27[m\27[K) {\
+      |         \27[01;35m\27[K~~~~~~~~~~~~~^~~~~~~~~~~~~\27[m\27[K\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:\27[m\27[K In member function ‘\27[01m\27[Kvoid vol_arb::HiddenMarkovModel::\27[01;32m\27[KsetStateRegimeMapping\27[m\27[K(const std::vector<vol_arb::MarketRegime>&)\27[m\27[K’:\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:898:24:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kstd::vector<vol_arb::MarketRegime>::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} and ‘\27[01m\27[Kint\27[m\27[K’ [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+  898 |     if (\27[01;35m\27[Kmapping.size() != numStates_\27[m\27[K) {\
+      |         \27[01;35m\27[K~~~~~~~~~~~~~~~^~~~~~~~~~~~~\27[m\27[K\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:\27[m\27[K In static member function ‘\27[01m\27[Kstatic vol_arb::Vector vol_arb::MarketFeatures::\27[01;32m\27[KextractVolatilityFeatures\27[m\27[K(const std::vector<double>&, int)\27[m\27[K’:\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:1070:54:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kint\27[m\27[K’ and ‘\27[01m\27[Kstd::vector<double>::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+ 1070 |     for (int i = returns.size() - effectiveWindow; \27[01;35m\27[Ki < returns.size()\27[m\27[K; ++i) {\
+      |                                                    \27[01;35m\27[K~~^~~~~~~~~~~~~~~~\27[m\27[K\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:1083:54:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kint\27[m\27[K’ and ‘\27[01m\27[Kstd::vector<double>::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+ 1083 |     for (int i = returns.size() - effectiveWindow; \27[01;35m\27[Ki < returns.size()\27[m\27[K; ++i) {\
+      |                                                    \27[01;35m\27[K~~^~~~~~~~~~~~~~~~\27[m\27[K\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:1095:54:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kint\27[m\27[K’ and ‘\27[01m\27[Kstd::vector<double>::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+ 1095 |     for (int i = returns.size() - effectiveWindow; \27[01;35m\27[Ki < returns.size()\27[m\27[K; ++i) {\
+      |                                                    \27[01;35m\27[K~~^~~~~~~~~~~~~~~~\27[m\27[K\
+"
+}

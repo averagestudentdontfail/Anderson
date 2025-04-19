@@ -1,0 +1,17 @@
+{
+    errdata = "\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:\27[m\27[K In member function ‘\27[01m\27[Kvoid vol_arb::HiddenMarkovModel::\27[01;32m\27[KsetStateRegimeMapping\27[m\27[K(const std::vector<vol_arb::MarketRegime>&)\27[m\27[K’:\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:898:24:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kstd::vector<vol_arb::MarketRegime>::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} and ‘\27[01m\27[Kint\27[m\27[K’ [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+  898 |     if (\27[01;35m\27[Kmapping.size() != numStates_\27[m\27[K) {\
+      |         \27[01;35m\27[K~~~~~~~~~~~~~~~^~~~~~~~~~~~~\27[m\27[K\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:\27[m\27[K In static member function ‘\27[01m\27[Kstatic vol_arb::Vector vol_arb::MarketFeatures::\27[01;32m\27[KextractVolatilityFeatures\27[m\27[K(const std::vector<double>&, int)\27[m\27[K’:\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:1070:54:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kint\27[m\27[K’ and ‘\27[01m\27[Kstd::vector<double>::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+ 1070 |     for (int i = returns.size() - effectiveWindow; \27[01;35m\27[Ki < returns.size()\27[m\27[K; ++i) {\
+      |                                                    \27[01;35m\27[K~~^~~~~~~~~~~~~~~~\27[m\27[K\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:1083:54:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kint\27[m\27[K’ and ‘\27[01m\27[Kstd::vector<double>::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+ 1083 |     for (int i = returns.size() - effectiveWindow; \27[01;35m\27[Ki < returns.size()\27[m\27[K; ++i) {\
+      |                                                    \27[01;35m\27[K~~^~~~~~~~~~~~~~~~\27[m\27[K\
+\27[01m\27[Ksrc/vol_arb/models/hmm.cpp:1095:54:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kcomparison of integer expressions of different signedness: ‘\27[01m\27[Kint\27[m\27[K’ and ‘\27[01m\27[Kstd::vector<double>::size_type\27[m\27[K’ {aka ‘\27[01m\27[Klong unsigned int\27[m\27[K’} [\27[01;35m\27[K-Wsign-compare\27[m\27[K]\
+ 1095 |     for (int i = returns.size() - effectiveWindow; \27[01;35m\27[Ki < returns.size()\27[m\27[K; ++i) {\
+      |                                                    \27[01;35m\27[K~~^~~~~~~~~~~~~~~~\27[m\27[K\
+"
+}

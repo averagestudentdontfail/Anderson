@@ -1,0 +1,9 @@
+{
+    errdata = "\27[01m\27[Ksrc/test_cases/volatility_arbitrage_test.cpp:\27[m\27[K In member function ‘\27[01m\27[Kbool VolatilityArbitrageTest::\27[01;32m\27[KexecuteOpportunity\27[m\27[K(const vol_arb::ArbitrageOpportunity&, const vol_arb::MarketData&)\27[m\27[K’:\
+\27[01m\27[Ksrc/test_cases/volatility_arbitrage_test.cpp:99:16:\27[m\27[K \27[01;35m\27[Kwarning: \27[m\27[Kunused variable ‘\27[01m\27[KpositionSize\27[m\27[K’ [\27[01;35m\27[K-Wunused-variable\27[m\27[K]\
+   99 |         double \27[01;35m\27[KpositionSize\27[m\27[K = calculatePositionSize(opportunity, currentData);\
+      |                \27[01;35m\27[K^~~~~~~~~~~~\27[m\27[K\
+At global scope:\
+\27[01m\27[Kcc1plus:\27[m\27[K \27[01;36m\27[Knote: \27[m\27[Kunrecognized command-line option ‘\27[01m\27[K-Wno-gnu-line-marker\27[m\27[K’ may have been intended to silence earlier diagnostics\
+"
+}
