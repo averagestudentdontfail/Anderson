@@ -7,6 +7,7 @@
 #include "opt/simd.h"
 #include "opt/vector.h"
 #include <cmath>
+#include <sleef.h>
 #include <algorithm>
 #include <stdexcept>
 #include <sstream>
@@ -15,7 +16,7 @@
 #include <thread>
 #include <array>
 #include <vector>
-#include <cstring> // For std::memcpy
+#include <cstring> 
 #ifdef _OPENMP
 #include <omp.h>
 #endif

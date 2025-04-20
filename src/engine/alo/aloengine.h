@@ -13,6 +13,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <deque>
+#include "alodistribute.h"
 
 // Forward declarations
 namespace engine {

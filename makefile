@@ -21,9 +21,9 @@ endif
 # OpenMP flags
 OMPFLAGS = -fopenmp
 
-# Sleef library
-SLEEF_INCLUDE = -I/usr/local/include
-SLEEF_LIB = -L/usr/local/lib -lsleef
+# Sleef library - Updated paths to match your project structure
+SLEEF_INCLUDE = -I$(CURDIR)/vec/include
+SLEEF_LIB = -L$(CURDIR)/vec/lib -lsleef
 
 # Include directories
 INCLUDES = -I$(SRC_DIR) $(SLEEF_INCLUDE)
