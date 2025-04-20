@@ -314,7 +314,7 @@ public:
     /**
      * @brief Parallel batch pricing for large numbers of put options
      * 
-     * Uses multiple threads to accelerate batch pricing
+     * Uses OpenMP to accelerate batch pricing across multiple threads
      * 
      * @param S Current spot price
      * @param strikes Vector of strike prices
@@ -326,6 +326,21 @@ public:
      */
     std::vector<double> parallelBatchCalculatePut(double S, const std::vector<double>& strikes,
                                                  double r, double q, double vol, double T) const;
+
+    /**
+     * @brief Process a chunk of put options with SIMD acceleration
+     * 
+     * @param S Spot price (constant)
+     * @param strikes Array of strike prices
+     * @param r Risk-free rate (constant)
+     * @param q Dividend yield (constant)
+     * @param vol Volatility (constant)
+     * @param T Time to maturity (constant)
+     * @param results Output array for results
+     * @param size Number of options to process
+     */
+    void processSIMDChunk(double S, const double* strikes, double r, double q, 
+                        double vol, double T, double* results, size_t size) const;
     
 private:
     /**
@@ -380,172 +395,6 @@ private:
     double calculateCallExercisePremium(
         double S, double K, double r, double q, double vol, double T,
         const std::shared_ptr<num::ChebyshevInterpolation>& boundary) const;
-    
-    /**
-     * @class WorkerPool
-     * @brief Thread pool for parallel pricing
-     * 
-     * This class manages a pool of worker threads for
-     * efficient parallel execution of pricing tasks.
-     */
-    class WorkerPool {
-    public:
-        /**
-         * @brief Constructor
-         * 
-         * @param num_threads Number of worker threads (0 = use hardware concurrency)
-         */
-        WorkerPool(size_t num_threads = 0) {
-            if (num_threads == 0) {
-                num_threads = std::max(1u, std::thread::hardware_concurrency() - 1);
-            }
-            
-            // Create per-thread work queues
-            local_queues_.resize(num_threads);
-            for (size_t i = 0; i < num_threads; ++i) {
-                local_queues_[i] = std::make_unique<std::deque<std::function<void()>>>();
-            }
-            
-            // Start worker threads
-            workers_.reserve(num_threads);
-            for (size_t i = 0; i < num_threads; ++i) {
-                workers_.emplace_back([this, i] { this->worker_thread(i); });
-            }
-        }
-        
-        /**
-         * @brief Destructor
-         */
-        ~WorkerPool() {
-            {
-                std::unique_lock<std::mutex> lock(queue_mutex_);
-                shutdown_ = true;
-            }
-            cv_.notify_all();
-            for (auto& worker : workers_) {
-                if (worker.joinable()) {
-                    worker.join();
-                }
-            }
-        }
-        
-        /**
-         * @brief Enqueue a task for execution
-         * 
-         * @param f Task function
-         */
-        template<typename F>
-        void enqueue(F&& f) {
-            {
-                std::unique_lock<std::mutex> lock(queue_mutex_);
-                global_queue_.push_back(std::forward<F>(f));
-            }
-            cv_.notify_one();
-        }
-        
-        /**
-         * @brief Wait for all tasks to complete
-         */
-        void wait_all() {
-            std::unique_lock<std::mutex> lock(queue_mutex_);
-            completion_cv_.wait(lock, [this] {
-                return (global_queue_.empty() && active_count_ == 0);
-            });
-        }
-
-    private:
-        /**
-         * @brief Worker thread function
-         * 
-         * @param id Thread ID
-         */
-        void worker_thread(size_t id) {
-            while (true) {
-                std::function<void()> task;
-                bool have_task = false;
-                
-                // Try to take task from local queue first
-                if (!local_queues_[id]->empty()) {
-                    task = std::move(local_queues_[id]->front());
-                    local_queues_[id]->pop_front();
-                    have_task = true;
-                } 
-                else {
-                    // Try to steal from global queue
-                    std::unique_lock<std::mutex> lock(queue_mutex_);
-                    
-                    if (shutdown_ && global_queue_.empty()) {
-                        return; // Exit if shutdown and no more work
-                    }
-                    
-                    if (!global_queue_.empty()) {
-                        task = std::move(global_queue_.front());
-                        global_queue_.pop_front();
-                        have_task = true;
-                    } 
-                    else {
-                        // Try to steal from other threads
-                        lock.unlock();
-                        for (size_t i = 0; i < local_queues_.size(); ++i) {
-                            if (i == id) continue; // Don't steal from self
-                            
-                            std::unique_lock<std::mutex> lock(queue_mutex_);
-                            if (!local_queues_[i]->empty()) {
-                                task = std::move(local_queues_[i]->back());
-                                local_queues_[i]->pop_back(); // Steal from back
-                                have_task = true;
-                                break;
-                            }
-                        }
-                        
-                        // If no tasks found, wait for notification
-                        if (!have_task) {
-                            std::unique_lock<std::mutex> lock(queue_mutex_);
-                            if (global_queue_.empty() && active_count_ == 0) {
-                                completion_cv_.notify_all(); // Signal completion
-                            }
-                            cv_.wait(lock, [this] {
-                                return shutdown_ || !global_queue_.empty();
-                            });
-                            continue;
-                        }
-                    }
-                }
-                
-                // Execute task with deterministic timing
-                if (have_task) {
-                    active_count_++;
-                    task();
-                    active_count_--;
-                    
-                    // Signal completion if this was the last task
-                    std::unique_lock<std::mutex> lock(queue_mutex_);
-                    if (global_queue_.empty() && active_count_ == 0) {
-                        completion_cv_.notify_all();
-                    }
-                }
-            }
-        }
-        
-        std::vector<std::thread> workers_;
-        std::deque<std::function<void()>> global_queue_;
-        std::vector<std::unique_ptr<std::deque<std::function<void()>>>> local_queues_;
-        std::mutex queue_mutex_;
-        std::condition_variable cv_;
-        std::condition_variable completion_cv_;
-        std::atomic<bool> shutdown_{false};
-        std::atomic<size_t> active_count_{0};
-    };
-    
-    /**
-     * @brief Get the worker pool (singleton)
-     * 
-     * @return Reference to the worker pool
-     */
-    WorkerPool& get_worker_pool() const {
-        static WorkerPool pool;
-        return pool;
-    }
     
     /**
      * @class FixedPointEvaluator
