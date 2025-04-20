@@ -66,6 +66,15 @@ public:
     static void normalCDF(const double* x, double* result, size_t size);
     
     /**
+     * @brief Compute high-precision normal CDF of array elements
+     * 
+     * @param x Input array
+     * @param result Output array
+     * @param size Number of elements
+     */
+    static void normalCDFHighPrecision(const double* x, double* result, size_t size);
+    
+    /**
      * @brief Compute normal PDF of array elements using SLEEF
      * 
      * @param x Input array
@@ -183,6 +192,66 @@ public:
      * @param size Number of elements
      */
     static void expMultSqrt(const double* x, const double* y, double* result, size_t size);
+
+    /**
+     * @brief Fused operation to calculate d1 and d2 in a single pass
+     * 
+     * @param S Spot prices
+     * @param K Strike prices
+     * @param r Risk-free rates
+     * @param q Dividend yields
+     * @param vol Volatilities
+     * @param T Times to maturity
+     * @param d1 Output array for d1 values
+     * @param d2 Output array for d2 values
+     * @param size Number of options
+     */
+    static void bsD1D2(const double* S, const double* K, const double* r, const double* q, 
+                      const double* vol, const double* T, double* d1, double* d2, size_t size);
+
+    /**
+     * @brief Fused operation for e^(-r*T) * N(x) - common in option pricing
+     * 
+     * @param x Input x values for N(x)
+     * @param r Risk-free rates
+     * @param T Times to maturity
+     * @param result Output array
+     * @param size Number of elements
+     */
+    static void discountedNormal(const double* x, const double* r, const double* T, 
+                                double* result, size_t size);
+
+    /**
+     * @brief High-precision Black-Scholes put calculation
+     * 
+     * @param S Spot prices
+     * @param K Strike prices
+     * @param r Risk-free rates
+     * @param q Dividend yields
+     * @param vol Volatilities
+     * @param T Times to maturity
+     * @param result Output array for put prices
+     * @param size Number of options
+     */
+    static void bsPutHighPrecision(const double* S, const double* K, const double* r, 
+                                  const double* q, const double* vol, const double* T, 
+                                  double* result, size_t size);
+
+    /**
+     * @brief High-precision Black-Scholes call calculation
+     * 
+     * @param S Spot prices
+     * @param K Strike prices
+     * @param r Risk-free rates
+     * @param q Dividend yields
+     * @param vol Volatilities
+     * @param T Times to maturity
+     * @param result Output array for call prices
+     * @param size Number of options
+     */
+    static void bsCallHighPrecision(const double* S, const double* K, const double* r, 
+                                   const double* q, const double* vol, const double* T, 
+                                   double* result, size_t size);
 
     /**
      * @brief Generic binary operator template for fused operations

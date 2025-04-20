@@ -4,6 +4,7 @@
 #include <sleef.h>
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace engine {
 namespace alo {
@@ -177,6 +178,41 @@ void VectorMath::normalCDF(const double* x, double* result, size_t size) {
         // Blend extreme values and computed values
         __m256d result_vec = _mm256_blendv_pd(normal_result, extreme_result, large_mask);
         
+        _mm256_storeu_pd(result + i, result_vec);
+    }
+    
+    // Handle remaining elements
+    for (; i < size; ++i) {
+        result[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
+    }
+}
+
+void VectorMath::normalCDFHighPrecision(const double* x, double* result, size_t size) {
+    // Use scalar operations for small data sizes
+    if (!shouldUseSimd(size)) {
+        for (size_t i = 0; i < size; ++i) {
+            result[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
+        }
+        return;
+    }
+    
+    // Process in chunks of 4 using SLEEF's native erf function
+    size_t i = 0;
+    for (; i + 3 < size; i += 4) {
+        __m256d x_vec = _mm256_loadu_pd(x + i);
+        
+        // Scale for normal CDF: x/sqrt(2)
+        __m256d scaled_x = _mm256_div_pd(x_vec, _mm256_set1_pd(M_SQRT2));
+        
+        // Use SLEEF's native erf function
+        __m256d erf_x = Sleef_erfd4_u10avx2(scaled_x);
+        
+        // Calculate 0.5 * (1 + erf(x/sqrt(2)))
+        __m256d one = _mm256_set1_pd(1.0);
+        __m256d half = _mm256_set1_pd(0.5);
+        __m256d result_vec = _mm256_mul_pd(_mm256_add_pd(one, erf_x), half);
+        
+        // Store results
         _mm256_storeu_pd(result + i, result_vec);
     }
     
@@ -432,175 +468,8 @@ void VectorMath::bsD2(const double* d1, const double* vol, const double* T,
 
 void VectorMath::bsPut(const double* S, const double* K, const double* r, const double* q, 
                       const double* vol, const double* T, double* result, size_t size) {
-    // Use scalar operations for small data sizes
-    if (!shouldUseSimd(size)) {
-        for (size_t i = 0; i < size; ++i) {
-            // Handle degenerate cases
-            if (vol[i] <= 0.0 || T[i] <= 0.0) {
-                result[i] = std::max(0.0, K[i] - S[i]);
-                continue;
-            }
-            
-            // Calculate Black-Scholes
-            double d1 = (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) 
-                      / (vol[i] * std::sqrt(T[i]));
-            double d2 = d1 - vol[i] * std::sqrt(T[i]);
-            
-            double Nd1 = 0.5 * (1.0 + std::erf(-d1 / std::sqrt(2.0)));
-            double Nd2 = 0.5 * (1.0 + std::erf(-d2 / std::sqrt(2.0)));
-            
-            result[i] = K[i] * std::exp(-r[i] * T[i]) * Nd2 - S[i] * std::exp(-q[i] * T[i]) * Nd1;
-        }
-        return;
-    }
-    
-    // Process in chunks of 4 using the improved SIMD implementation
-    size_t i = 0;
-    for (; i + 3 < size; i += 4) {
-        // Load vectors
-        __m256d S_vec = _mm256_loadu_pd(S + i);
-        __m256d K_vec = _mm256_loadu_pd(K + i);
-        __m256d r_vec = _mm256_loadu_pd(r + i);
-        __m256d q_vec = _mm256_loadu_pd(q + i);
-        __m256d vol_vec = _mm256_loadu_pd(vol + i);
-        __m256d T_vec = _mm256_loadu_pd(T + i);
-        
-        // Check for degenerate cases
-        __m256d zero = _mm256_setzero_pd();
-        __m256d eps = _mm256_set1_pd(1e-10);
-        
-        // Create mask for vol <= 0 or T <= 0
-        __m256d vol_mask = _mm256_cmp_pd(vol_vec, eps, _CMP_LE_OQ);
-        __m256d t_mask = _mm256_cmp_pd(T_vec, eps, _CMP_LE_OQ);
-        __m256d degenerate_mask = _mm256_or_pd(vol_mask, t_mask);
-        
-        // Calculate K-S for degenerate cases
-        __m256d K_minus_S = _mm256_sub_pd(K_vec, S_vec);
-        __m256d degenerate_value = _mm256_max_pd(zero, K_minus_S);
-        
-        // If all are degenerate, just store intrinsic and continue
-        if (_mm256_movemask_pd(degenerate_mask) == 0xF) {
-            _mm256_storeu_pd(result + i, degenerate_value);
-            continue;
-        }
-        
-        // Calculate d1 components
-        __m256d sqrt_T = _mm256_sqrt_pd(T_vec);
-        __m256d vol_sqrt_T = _mm256_mul_pd(vol_vec, sqrt_T);
-        __m256d S_div_K = _mm256_div_pd(S_vec, K_vec);
-        __m256d log_S_div_K = Sleef_logd4_u10avx2(S_div_K);
-        
-        __m256d vol_squared = _mm256_mul_pd(vol_vec, vol_vec);
-        __m256d half_vol_squared = _mm256_mul_pd(_mm256_set1_pd(0.5), vol_squared);
-        __m256d r_minus_q = _mm256_sub_pd(r_vec, q_vec);
-        __m256d drift = _mm256_add_pd(r_minus_q, half_vol_squared);
-        __m256d drift_T = _mm256_mul_pd(drift, T_vec);
-        __m256d numerator = _mm256_add_pd(log_S_div_K, drift_T);
-        
-        // Calculate d1 and d2
-        __m256d d1 = _mm256_div_pd(numerator, vol_sqrt_T);
-        __m256d d2 = _mm256_sub_pd(d1, vol_sqrt_T);
-        
-        // Negate d1 and d2 for put calculation
-        __m256d neg_d1 = _mm256_sub_pd(zero, d1);
-        __m256d neg_d2 = _mm256_sub_pd(zero, d2);
-        
-        // Calculate N(-d1) and N(-d2) using our improved normalCDF
-        
-        // Constants for the A&S 26.2.17 approximation
-        const __m256d b1 = _mm256_set1_pd(0.31938153);
-        const __m256d b2 = _mm256_set1_pd(-0.356563782);
-        const __m256d b3 = _mm256_set1_pd(1.781477937);
-        const __m256d b4 = _mm256_set1_pd(-1.821255978);
-        const __m256d b5 = _mm256_set1_pd(1.330274429);
-        const __m256d p = _mm256_set1_pd(0.2316419);
-        const __m256d one = _mm256_set1_pd(1.0);
-        const __m256d inv_sqrt_2pi = _mm256_set1_pd(0.3989422804); // 1/sqrt(2π)
-        
-        // Process N(-d1)
-        __m256d abs_neg_d1 = _mm256_andnot_pd(_mm256_set1_pd(-0.0), neg_d1);
-        __m256d sign_mask_d1 = _mm256_cmp_pd(neg_d1, _mm256_setzero_pd(), _CMP_GE_OQ);
-        __m256d large_mask_d1 = _mm256_cmp_pd(abs_neg_d1, _mm256_set1_pd(8.0), _CMP_GT_OQ);
-        __m256d extreme_result_d1 = _mm256_blendv_pd(_mm256_setzero_pd(), one, sign_mask_d1);
-        
-        __m256d t_d1 = _mm256_div_pd(one, _mm256_add_pd(one, _mm256_mul_pd(p, abs_neg_d1)));
-        __m256d poly_d1 = b1;
-        poly_d1 = _mm256_add_pd(_mm256_mul_pd(poly_d1, t_d1), b2);
-        poly_d1 = _mm256_add_pd(_mm256_mul_pd(poly_d1, t_d1), b3);
-        poly_d1 = _mm256_add_pd(_mm256_mul_pd(poly_d1, t_d1), b4);
-        poly_d1 = _mm256_add_pd(_mm256_mul_pd(poly_d1, t_d1), b5);
-        poly_d1 = _mm256_mul_pd(poly_d1, t_d1);
-        
-        __m256d x_squared_d1 = _mm256_mul_pd(abs_neg_d1, abs_neg_d1);
-        __m256d neg_half_x_squared_d1 = _mm256_mul_pd(_mm256_set1_pd(-0.5), x_squared_d1);
-        __m256d exp_term_d1 = Sleef_expd4_u10avx2(neg_half_x_squared_d1);
-        __m256d z_d1 = _mm256_mul_pd(exp_term_d1, inv_sqrt_2pi);
-        __m256d term_d1 = _mm256_mul_pd(poly_d1, z_d1);
-        __m256d Nd1 = _mm256_blendv_pd(term_d1, _mm256_sub_pd(one, term_d1), sign_mask_d1);
-        Nd1 = _mm256_blendv_pd(Nd1, extreme_result_d1, large_mask_d1);
-        
-        // Process N(-d2) - same approach
-        __m256d abs_neg_d2 = _mm256_andnot_pd(_mm256_set1_pd(-0.0), neg_d2);
-        __m256d sign_mask_d2 = _mm256_cmp_pd(neg_d2, _mm256_setzero_pd(), _CMP_GE_OQ);
-        __m256d large_mask_d2 = _mm256_cmp_pd(abs_neg_d2, _mm256_set1_pd(8.0), _CMP_GT_OQ);
-        __m256d extreme_result_d2 = _mm256_blendv_pd(_mm256_setzero_pd(), one, sign_mask_d2);
-        
-        __m256d t_d2 = _mm256_div_pd(one, _mm256_add_pd(one, _mm256_mul_pd(p, abs_neg_d2)));
-        __m256d poly_d2 = b1;
-        poly_d2 = _mm256_add_pd(_mm256_mul_pd(poly_d2, t_d2), b2);
-        poly_d2 = _mm256_add_pd(_mm256_mul_pd(poly_d2, t_d2), b3);
-        poly_d2 = _mm256_add_pd(_mm256_mul_pd(poly_d2, t_d2), b4);
-        poly_d2 = _mm256_add_pd(_mm256_mul_pd(poly_d2, t_d2), b5);
-        poly_d2 = _mm256_mul_pd(poly_d2, t_d2);
-        
-        __m256d x_squared_d2 = _mm256_mul_pd(abs_neg_d2, abs_neg_d2);
-        __m256d neg_half_x_squared_d2 = _mm256_mul_pd(_mm256_set1_pd(-0.5), x_squared_d2);
-        __m256d exp_term_d2 = Sleef_expd4_u10avx2(neg_half_x_squared_d2);
-        __m256d z_d2 = _mm256_mul_pd(exp_term_d2, inv_sqrt_2pi);
-        __m256d term_d2 = _mm256_mul_pd(poly_d2, z_d2);
-        __m256d Nd2 = _mm256_blendv_pd(term_d2, _mm256_sub_pd(one, term_d2), sign_mask_d2);
-        Nd2 = _mm256_blendv_pd(Nd2, extreme_result_d2, large_mask_d2);
-        
-        // Calculate discount factors
-        __m256d neg_r_T = _mm256_mul_pd(_mm256_sub_pd(zero, r_vec), T_vec);
-        __m256d neg_q_T = _mm256_mul_pd(_mm256_sub_pd(zero, q_vec), T_vec);
-        __m256d dr = Sleef_expd4_u10avx2(neg_r_T);
-        __m256d dq = Sleef_expd4_u10avx2(neg_q_T);
-        
-        // K * e^(-rT) * N(-d2)
-        __m256d term1 = _mm256_mul_pd(K_vec, dr);
-        term1 = _mm256_mul_pd(term1, Nd2);
-        
-        // S * e^(-qT) * N(-d1)
-        __m256d term2 = _mm256_mul_pd(S_vec, dq);
-        term2 = _mm256_mul_pd(term2, Nd1);
-        
-        // put = K * e^(-rT) * N(-d2) - S * e^(-qT) * N(-d1)
-        __m256d put_value = _mm256_sub_pd(term1, term2);
-        
-        // Blend degenerate and computed values
-        __m256d final_value = _mm256_blendv_pd(put_value, degenerate_value, degenerate_mask);
-        
-        // Store result
-        _mm256_storeu_pd(result + i, final_value);
-    }
-    
-    // Handle remaining elements
-    for (; i < size; ++i) {
-        if (vol[i] <= 0.0 || T[i] <= 0.0) {
-            result[i] = std::max(0.0, K[i] - S[i]);
-            continue;
-        }
-        
-        double d1 = (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) 
-                  / (vol[i] * std::sqrt(T[i]));
-        double d2 = d1 - vol[i] * std::sqrt(T[i]);
-        
-        double Nd1 = 0.5 * (1.0 + std::erf(-d1 / std::sqrt(2.0)));
-        double Nd2 = 0.5 * (1.0 + std::erf(-d2 / std::sqrt(2.0)));
-        
-        result[i] = K[i] * std::exp(-r[i] * T[i]) * Nd2 - S[i] * std::exp(-q[i] * T[i]) * Nd1;
-    }
+    // Just call our high-precision implementation
+    bsPutHighPrecision(S, K, r, q, vol, T, result, size);
 }
 
 void VectorMath::bsCall(const double* S, const double* K, const double* r, const double* q, 
@@ -627,154 +496,10 @@ void VectorMath::bsCall(const double* S, const double* K, const double* r, const
         return;
     }
     
-    // Process in chunks of 4 using our improved SIMD approach
-    size_t i = 0;
-    for (; i + 3 < size; i += 4) {
-        // Load vectors
-        __m256d S_vec = _mm256_loadu_pd(S + i);
-        __m256d K_vec = _mm256_loadu_pd(K + i);
-        __m256d r_vec = _mm256_loadu_pd(r + i);
-        __m256d q_vec = _mm256_loadu_pd(q + i);
-        __m256d vol_vec = _mm256_loadu_pd(vol + i);
-        __m256d T_vec = _mm256_loadu_pd(T + i);
-        
-        // Check for degenerate cases (vol <= 0 or T <= 0)
-        __m256d zero = _mm256_setzero_pd();
-        __m256d eps = _mm256_set1_pd(1e-10);
-        __m256d vol_mask = _mm256_cmp_pd(vol_vec, eps, _CMP_LE_OQ);
-        __m256d t_mask = _mm256_cmp_pd(T_vec, eps, _CMP_LE_OQ);
-        __m256d degenerate_mask = _mm256_or_pd(vol_mask, t_mask);
-        
-        // Calculate S-K for degenerate cases
-        __m256d S_minus_K = _mm256_sub_pd(S_vec, K_vec);
-        __m256d degenerate_value = _mm256_max_pd(zero, S_minus_K);
-        
-        // If all are degenerate, just store and continue
-        if (_mm256_movemask_pd(degenerate_mask) == 0xF) {
-            _mm256_storeu_pd(result + i, degenerate_value);
-            continue;
-        }
-        
-        // Calculate d1 and d2
-        __m256d sqrt_T = _mm256_sqrt_pd(T_vec);
-        __m256d vol_sqrt_T = _mm256_mul_pd(vol_vec, sqrt_T);
-        __m256d S_div_K = _mm256_div_pd(S_vec, K_vec);
-        __m256d log_S_div_K = Sleef_logd4_u10avx2(S_div_K);
-        __m256d vol_squared = _mm256_mul_pd(vol_vec, vol_vec);
-        __m256d half_vol_squared = _mm256_mul_pd(_mm256_set1_pd(0.5), vol_squared);
-        __m256d r_minus_q = _mm256_sub_pd(r_vec, q_vec);
-        __m256d drift = _mm256_add_pd(r_minus_q, half_vol_squared);
-        __m256d drift_T = _mm256_mul_pd(drift, T_vec);
-        __m256d numerator = _mm256_add_pd(log_S_div_K, drift_T);
-        __m256d d1 = _mm256_div_pd(numerator, vol_sqrt_T);
-        __m256d d2 = _mm256_sub_pd(d1, vol_sqrt_T);
-        
-        // Calculate N(d1) and N(d2) using our improved normalCDF implementation
-        // Using the same A&S 26.2.17 formula as in the put case
-        
-        // Constants for the A&S approximation
-        const __m256d b1 = _mm256_set1_pd(0.31938153);
-        const __m256d b2 = _mm256_set1_pd(-0.356563782);
-        const __m256d b3 = _mm256_set1_pd(1.781477937);
-        const __m256d b4 = _mm256_set1_pd(-1.821255978);
-        const __m256d b5 = _mm256_set1_pd(1.330274429);
-        const __m256d p = _mm256_set1_pd(0.2316419);
-        const __m256d one = _mm256_set1_pd(1.0);
-        const __m256d inv_sqrt_2pi = _mm256_set1_pd(0.3989422804); // 1/sqrt(2π)
-        
-        // Calculate N(d1)
-        __m256d abs_d1 = _mm256_andnot_pd(_mm256_set1_pd(-0.0), d1);
-        __m256d sign_mask_d1 = _mm256_cmp_pd(d1, _mm256_setzero_pd(), _CMP_GE_OQ);
-        __m256d large_mask_d1 = _mm256_cmp_pd(abs_d1, _mm256_set1_pd(8.0), _CMP_GT_OQ);
-        __m256d extreme_result_d1 = _mm256_blendv_pd(_mm256_setzero_pd(), one, sign_mask_d1);
-        
-        __m256d t_d1 = _mm256_div_pd(one, _mm256_add_pd(one, _mm256_mul_pd(p, abs_d1)));
-        __m256d poly_d1 = b1;
-        poly_d1 = _mm256_add_pd(_mm256_mul_pd(poly_d1, t_d1), b2);
-        poly_d1 = _mm256_add_pd(_mm256_mul_pd(poly_d1, t_d1), b3);
-        poly_d1 = _mm256_add_pd(_mm256_mul_pd(poly_d1, t_d1), b4);
-        poly_d1 = _mm256_add_pd(_mm256_mul_pd(poly_d1, t_d1), b5);
-        poly_d1 = _mm256_mul_pd(poly_d1, t_d1);
-        
-        __m256d x_squared_d1 = _mm256_mul_pd(abs_d1, abs_d1);
-        __m256d neg_half_x_squared_d1 = _mm256_mul_pd(_mm256_set1_pd(-0.5), x_squared_d1);
-        __m256d exp_term_d1 = Sleef_expd4_u10avx2(neg_half_x_squared_d1);
-        __m256d z_d1 = _mm256_mul_pd(exp_term_d1, inv_sqrt_2pi);
-        __m256d term_d1 = _mm256_mul_pd(poly_d1, z_d1);
-        
-        // For d1 >= 0: 1.0 - term_d1, otherwise term_d1
-        __m256d Nd1 = _mm256_blendv_pd(term_d1, _mm256_sub_pd(one, term_d1), sign_mask_d1);
-        Nd1 = _mm256_blendv_pd(Nd1, extreme_result_d1, large_mask_d1);
-        
-        // Calculate N(d2) - same approach
-        __m256d abs_d2 = _mm256_andnot_pd(_mm256_set1_pd(-0.0), d2);
-        __m256d sign_mask_d2 = _mm256_cmp_pd(d2, _mm256_setzero_pd(), _CMP_GE_OQ);
-        __m256d large_mask_d2 = _mm256_cmp_pd(abs_d2, _mm256_set1_pd(8.0), _CMP_GT_OQ);
-        __m256d extreme_result_d2 = _mm256_blendv_pd(_mm256_setzero_pd(), one, sign_mask_d2);
-        
-        __m256d t_d2 = _mm256_div_pd(one, _mm256_add_pd(one, _mm256_mul_pd(p, abs_d2)));
-        __m256d poly_d2 = b1;
-        poly_d2 = _mm256_add_pd(_mm256_mul_pd(poly_d2, t_d2), b2);
-        poly_d2 = _mm256_add_pd(_mm256_mul_pd(poly_d2, t_d2), b3);
-        poly_d2 = _mm256_add_pd(_mm256_mul_pd(poly_d2, t_d2), b4);
-        poly_d2 = _mm256_add_pd(_mm256_mul_pd(poly_d2, t_d2), b5);
-        poly_d2 = _mm256_mul_pd(poly_d2, t_d2);
-        
-        __m256d x_squared_d2 = _mm256_mul_pd(abs_d2, abs_d2);
-        __m256d neg_half_x_squared_d2 = _mm256_mul_pd(_mm256_set1_pd(-0.5), x_squared_d2);
-        __m256d exp_term_d2 = Sleef_expd4_u10avx2(neg_half_x_squared_d2);
-        __m256d z_d2 = _mm256_mul_pd(exp_term_d2, inv_sqrt_2pi);
-        __m256d term_d2 = _mm256_mul_pd(poly_d2, z_d2);
-        
-        // For d2 >= 0: 1.0 - term_d2, otherwise term_d2
-        __m256d Nd2 = _mm256_blendv_pd(term_d2, _mm256_sub_pd(one, term_d2), sign_mask_d2);
-        Nd2 = _mm256_blendv_pd(Nd2, extreme_result_d2, large_mask_d2);
-        
-        // Calculate discount factors
-        __m256d neg_r_T = _mm256_mul_pd(_mm256_sub_pd(zero, r_vec), T_vec);
-        __m256d neg_q_T = _mm256_mul_pd(_mm256_sub_pd(zero, q_vec), T_vec);
-        __m256d dr = Sleef_expd4_u10avx2(neg_r_T);
-        __m256d dq = Sleef_expd4_u10avx2(neg_q_T);
-        
-        // S * e^(-qT) * N(d1)
-        __m256d term1 = _mm256_mul_pd(S_vec, dq);
-        term1 = _mm256_mul_pd(term1, Nd1);
-        
-        // K * e^(-rT) * N(d2)
-        __m256d term2 = _mm256_mul_pd(K_vec, dr);
-        term2 = _mm256_mul_pd(term2, Nd2);
-        
-        // call = S * e^(-qT) * N(d1) - K * e^(-rT) * N(d2)
-        __m256d call_value = _mm256_sub_pd(term1, term2);
-        
-        // Blend degenerate and computed values
-        __m256d final_value = _mm256_blendv_pd(call_value, degenerate_value, degenerate_mask);
-        
-        // Store result
-        _mm256_storeu_pd(result + i, final_value);
-    }
-    
-    // Handle remaining elements
-    for (; i < size; ++i) {
-        if (vol[i] <= 0.0 || T[i] <= 0.0) {
-            result[i] = std::max(0.0, S[i] - K[i]);
-            continue;
-        }
-        
-        double d1 = (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) 
-                  / (vol[i] * std::sqrt(T[i]));
-        double d2 = d1 - vol[i] * std::sqrt(T[i]);
-        
-        double Nd1 = 0.5 * (1.0 + std::erf(d1 / std::sqrt(2.0)));
-        double Nd2 = 0.5 * (1.0 + std::erf(d2 / std::sqrt(2.0)));
-        
-        result[i] = S[i] * std::exp(-q[i] * T[i]) * Nd1 - K[i] * std::exp(-r[i] * T[i]) * Nd2;
-    }
+    // Use high-precision implementation here too
+    bsCallHighPrecision(S, K, r, q, vol, T, result, size);
 }
 
-/**
- * @brief Compute exp(x)*sqrt(y) in a single pass with SIMD optimization
- */
 void VectorMath::expMultSqrt(const double* x, const double* y, double* result, size_t size) {
     // Use scalar operations for small data sizes
     if (!shouldUseSimd(size)) {
@@ -807,6 +532,239 @@ void VectorMath::expMultSqrt(const double* x, const double* y, double* result, s
     // Handle remaining elements
     for (; i < size; ++i) {
         result[i] = std::exp(x[i]) * std::sqrt(y[i]);
+    }
+}
+
+void VectorMath::bsD1D2(const double* S, const double* K, const double* r, const double* q, 
+                      const double* vol, const double* T, double* d1, double* d2, size_t size) {
+    // Use scalar operations for small data sizes or when SIMD isn't available
+    if (!shouldUseSimd(size)) {
+        for (size_t i = 0; i < size; ++i) {
+            // Handle degenerate cases
+            if (vol[i] <= 0.0 || T[i] <= 0.0) {
+                d1[i] = 0.0;  // Default values for degenerate cases
+                d2[i] = 0.0;
+                continue;
+            }
+            
+            // Standard Black-Scholes d1 and d2 calculation
+            double vol_sqrt_T = vol[i] * std::sqrt(T[i]);
+            double half_vol_squared = 0.5 * vol[i] * vol[i];
+            double log_S_div_K = std::log(S[i] / K[i]);
+            double drift = r[i] - q[i] + half_vol_squared;
+            double drift_T = drift * T[i];
+            
+            d1[i] = (log_S_div_K + drift_T) / vol_sqrt_T;
+            d2[i] = d1[i] - vol_sqrt_T;
+        }
+        return;
+    }
+    
+    // Process in chunks of 4 using AVX2
+    size_t i = 0;
+    for (; i + 3 < size; i += 4) {
+        // Load vectors
+        __m256d S_vec = _mm256_loadu_pd(S + i);
+        __m256d K_vec = _mm256_loadu_pd(K + i);
+        __m256d r_vec = _mm256_loadu_pd(r + i);
+        __m256d q_vec = _mm256_loadu_pd(q + i);
+        __m256d vol_vec = _mm256_loadu_pd(vol + i);
+        __m256d T_vec = _mm256_loadu_pd(T + i);
+        
+        // Check for degenerate cases
+        __m256d eps = _mm256_set1_pd(1e-10);
+        __m256d vol_mask = _mm256_cmp_pd(vol_vec, eps, _CMP_LE_OQ);
+        __m256d T_mask = _mm256_cmp_pd(T_vec, eps, _CMP_LE_OQ);
+        __m256d degenerate_mask = _mm256_or_pd(vol_mask, T_mask);
+        
+        // For non-degenerate cases, calculate d1 and d2
+        __m256d sqrt_T = _mm256_sqrt_pd(T_vec);
+        __m256d vol_sqrt_T = _mm256_mul_pd(vol_vec, sqrt_T);
+        
+        // Calculate log(S/K) with high precision
+        __m256d S_div_K = _mm256_div_pd(S_vec, K_vec);
+        __m256d log_S_div_K = Sleef_logd4_u10avx2(S_div_K);
+        
+        // Calculate drift term
+        __m256d vol_squared = _mm256_mul_pd(vol_vec, vol_vec);
+        __m256d half_vol_squared = _mm256_mul_pd(_mm256_set1_pd(0.5), vol_squared);
+        __m256d r_minus_q = _mm256_sub_pd(r_vec, q_vec);
+        __m256d drift = _mm256_add_pd(r_minus_q, half_vol_squared);
+        __m256d drift_T = _mm256_mul_pd(drift, T_vec);
+        
+        // Calculate d1 and d2
+        __m256d numerator = _mm256_add_pd(log_S_div_K, drift_T);
+        __m256d d1_vec = _mm256_div_pd(numerator, vol_sqrt_T);
+        __m256d d2_vec = _mm256_sub_pd(d1_vec, vol_sqrt_T);
+        
+        // Set default values for degenerate cases
+        __m256d zero = _mm256_setzero_pd();
+        d1_vec = _mm256_blendv_pd(d1_vec, zero, degenerate_mask);
+        d2_vec = _mm256_blendv_pd(d2_vec, zero, degenerate_mask);
+        
+        // Store results
+        _mm256_storeu_pd(d1 + i, d1_vec);
+        _mm256_storeu_pd(d2 + i, d2_vec);
+    }
+    
+    // Handle remaining elements
+    for (; i < size; ++i) {
+        if (vol[i] <= 0.0 || T[i] <= 0.0) {
+            d1[i] = 0.0;
+            d2[i] = 0.0;
+            continue;
+        }
+        
+        double vol_sqrt_T = vol[i] * std::sqrt(T[i]);
+        double half_vol_squared = 0.5 * vol[i] * vol[i];
+        double log_S_div_K = std::log(S[i] / K[i]);
+        double drift = r[i] - q[i] + half_vol_squared;
+        double drift_T = drift * T[i];
+        
+        d1[i] = (log_S_div_K + drift_T) / vol_sqrt_T;
+        d2[i] = d1[i] - vol_sqrt_T;
+    }
+}
+
+void VectorMath::discountedNormal(const double* x, const double* r, const double* T, 
+                                 double* result, size_t size) {
+    // Use scalar operations for small data sizes or when SIMD isn't available
+    if (!shouldUseSimd(size)) {
+        for (size_t i = 0; i < size; ++i) {
+            // Calculate discount factor
+            double discount = std::exp(-r[i] * T[i]);
+            
+            // Calculate normal CDF with maximum precision
+            double normal = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
+            
+            // Combine results
+            result[i] = discount * normal;
+        }
+        return;
+    }
+    
+    // Process in chunks of 4 using AVX2
+    size_t i = 0;
+    for (; i + 3 < size; i += 4) {
+        __m256d x_vec = _mm256_loadu_pd(x + i);
+        __m256d r_vec = _mm256_loadu_pd(r + i);
+        __m256d T_vec = _mm256_loadu_pd(T + i);
+        
+        // Calculate discount factor e^(-r*T)
+        __m256d neg_r_T = _mm256_mul_pd(
+            _mm256_mul_pd(r_vec, T_vec),
+            _mm256_set1_pd(-1.0)
+        );
+        __m256d discount = Sleef_expd4_u10avx2(neg_r_T);
+        
+        // Calculate normal CDF with temporary array
+        double normal_values[4];
+        _mm256_storeu_pd(normal_values, x_vec);
+        
+        for (int j = 0; j < 4; j++) {
+            normal_values[j] = 0.5 * (1.0 + std::erf(normal_values[j] / std::sqrt(2.0)));
+        }
+        
+        __m256d normal = _mm256_loadu_pd(normal_values);
+        
+        // Multiply discount by normal
+        __m256d result_vec = _mm256_mul_pd(discount, normal);
+        
+        // Store results
+        _mm256_storeu_pd(result + i, result_vec);
+    }
+    
+    // Handle remaining elements
+    for (; i < size; ++i) {
+        double discount = std::exp(-r[i] * T[i]);
+        double normal = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
+        result[i] = discount * normal;
+    }
+}
+
+void VectorMath::bsPutHighPrecision(const double *S, const double *K,
+                                    const double *r, const double *q,
+                                    const double *vol, const double *T,
+                                    double *result, size_t size) {
+  // Allocate temporary arrays for intermediate results
+  std::vector<double> d1(size);
+  std::vector<double> d2(size);
+  std::vector<double> neg_d1(size);
+  std::vector<double> neg_d2(size);
+  std::vector<double> Nd1(size);
+  std::vector<double> Nd2(size);
+
+  // Calculate d1 and d2 in a single pass
+  bsD1D2(S, K, r, q, vol, T, d1.data(), d2.data(), size);
+
+  // Negate d1 and d2 for put formula
+  for (size_t i = 0; i < size; i++) {
+    neg_d1[i] = -d1[i];
+    neg_d2[i] = -d2[i];
+  }
+
+  // Use the SLEEF-based normalCDFHighPrecision implementation
+  normalCDFHighPrecision(neg_d1.data(), Nd1.data(), size);
+  normalCDFHighPrecision(neg_d2.data(), Nd2.data(), size);
+
+  // Calculate discount factors
+  std::vector<double> discount_r(size);
+  std::vector<double> discount_q(size);
+
+  for (size_t i = 0; i < size; i++) {
+    discount_r[i] = std::exp(-r[i] * T[i]);
+    discount_q[i] = std::exp(-q[i] * T[i]);
+  }
+
+  // Calculate final put price
+  for (size_t i = 0; i < size; i++) {
+    // Handle degenerate cases
+    if (vol[i] <= 0.0 || T[i] <= 0.0) {
+      result[i] = std::max(0.0, K[i] - S[i]);
+      continue;
+    }
+
+    double term1 = K[i] * discount_r[i] * Nd2[i];
+    double term2 = S[i] * discount_q[i] * Nd1[i];
+    result[i] = term1 - term2;
+  }
+}
+
+void VectorMath::bsCallHighPrecision(const double* S, const double* K, const double* r,
+                                    const double* q, const double* vol, const double* T,
+                                    double* result, size_t size) {
+    // Allocate temporary arrays for intermediate results
+    std::vector<double> d1(size);
+    std::vector<double> d2(size);
+    std::vector<double> Nd1(size);
+    std::vector<double> Nd2(size);
+    std::vector<double> discount_r(size);
+    std::vector<double> discount_q(size);
+    
+    // Calculate d1 and d2 in a single pass
+    bsD1D2(S, K, r, q, vol, T, d1.data(), d2.data(), size);
+    
+    // Calculate N(d1) and N(d2) using high precision function
+    normalCDFHighPrecision(d1.data(), Nd1.data(), size);
+    normalCDFHighPrecision(d2.data(), Nd2.data(), size);
+    
+    // Calculate discount factors
+    for (size_t i = 0; i < size; i++) {
+        discount_r[i] = std::exp(-r[i] * T[i]);
+        discount_q[i] = std::exp(-q[i] * T[i]);
+    }
+    
+    // Calculate final call price: S * e^(-qT) * N(d1) - K * e^(-rT) * N(d2)
+    for (size_t i = 0; i < size; i++) {
+        // Handle degenerate cases
+        if (vol[i] <= 0.0 || T[i] <= 0.0) {
+            result[i] = std::max(0.0, S[i] - K[i]);
+            continue;
+        }
+        
+        double term1 = S[i] * discount_q[i] * Nd1[i];
+        double term2 = K[i] * discount_r[i] * Nd2[i];
+        result[i] = term1 - term2;
     }
 }
 
