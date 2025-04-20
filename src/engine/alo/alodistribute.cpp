@@ -3,7 +3,6 @@
 #include <stdexcept>
 #include <algorithm>
 #include <chrono>
-#include <memory>
 
 namespace engine {
 namespace alo {
@@ -158,7 +157,8 @@ void TaskDispatcher::sendWorkToNode(int node, const std::vector<size_t>& workloa
     MPI_Send(params, 5, MPI_DOUBLE, node, TAG_PARAMETERS, MPI_COMM_WORLD);
     
     // Send number of chunks
-    MPI_Send(&workload[node], 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_COUNT, MPI_COMM_WORLD);
+    auto nodeWorkload = workload[node];
+    MPI_Send(&nodeWorkload, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_COUNT, MPI_COMM_WORLD);
     
     // Calculate start index for this node
     size_t startIdx = 0;
@@ -345,60 +345,31 @@ void TaskDispatcher::implementWorkStealing(
     double S, const std::vector<double>& strikes,
     double r, double q, double vol, double T,
     std::vector<double>& results) {
-    
+    // Simplified implementation - OpenMP can handle work distribution internally
+    // This is a stub implementation for now
+    // In a production system, we would implement more sophisticated work stealing
+
     // Track which workers are ready for more work
     std::vector<bool> workerReady(worldSize_, false);
     
-    // Create additional chunks for remaining work
-    size_t remaining = 0;
-    // Implementation left intentionally blank - would calculate remaining work
-    if (remaining == 0) {
-        return; // No work stealing needed
-    }
-    
-    // Create work chunks
-    std::vector<WorkItem> workItems;
-    // Create work chunks for remaining strikes
-    
-    // Distribute work chunks to ready workers
-    while (!workItems.empty()) {
-        // Check for ready workers
-        for (int node = 1; node < worldSize_; ++node) {
-            if (workerReady[node]) {
-                // Send work to this node
-                WorkItem item = workItems.back();
-                workItems.pop_back();
-                
-                // Actual sending logic would be here
-                
-                workerReady[node] = false;
-                
-                if (workItems.empty()) {
-                    break;
-                }
-            }
-        }
-        
-        // Check for new ready signals
+    // Check for ready workers
+    for (int node = 1; node < worldSize_; ++node) {
         int ready = 0;
         MPI_Status status;
-        MPI_Iprobe(MPI_ANY_SOURCE, TAG_READY, MPI_COMM_WORLD, &ready, &status);
+        MPI_Iprobe(node, TAG_READY, MPI_COMM_WORLD, &ready, &status);
         
         if (ready) {
-            int source = status.MPI_SOURCE;
+            // Node is ready for more work
             double params[5];
-            MPI_Recv(params, 5, MPI_DOUBLE, source, TAG_READY, 
+            MPI_Recv(params, 5, MPI_DOUBLE, node, TAG_READY, 
                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             
-            workerReady[source] = true;
-        }
-        
-        // Prevent busy waiting
-        if (!ready && std::all_of(workerReady.begin()+1, workerReady.end(), 
-            [](bool r) { return !r; })) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            workerReady[node] = true;
         }
     }
+    
+    // Currently, we don't redistribute additional work
+    // This could be extended in the future
 }
 
 } // namespace dist

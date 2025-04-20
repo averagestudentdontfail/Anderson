@@ -13,7 +13,6 @@
 #include <condition_variable>
 #include <atomic>
 #include <deque>
-#include "alodistribute.h"
 
 // Forward declarations
 namespace engine {
@@ -22,11 +21,6 @@ namespace num {
     class Integrator;
     class ChebyshevInterpolation;
 }
-}
-}
-
-namespace engine {
-namespace alo {
 
 /**
  * @enum ALOScheme
@@ -473,7 +467,14 @@ private:
     mutable std::unordered_map<std::string, double> legacy_cache_;
 };
 
-} // namespace alo
-} // namespace engine
+// Forward declaration for distributed task dispatcher
+namespace dist {
+    class TaskDispatcher;
+    
+    // Factory function to create task dispatchers
+    std::shared_ptr<TaskDispatcher> createTaskDispatcher(ALOScheme scheme, size_t chunkSize = 1024);
+}
+
+}} // namespace engine::alo
 
 #endif // ENGINE_ALO_ALOENGINE_H

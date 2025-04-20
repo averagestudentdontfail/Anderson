@@ -27,9 +27,9 @@ SLEEF_LIB = -L$(CURDIR)/vec/lib -lsleef
 # Include directories
 INCLUDES = -I$(SRC_DIR) $(SLEEF_INCLUDE)
 
-# Source files - Explicitly list alodistribute.cpp here
+# Source files - List alodistribute.cpp first to ensure proper dependency resolution
 ENGINE_SRC = $(SRC_DIR)/engine/alo/alodistribute.cpp \
-             $(wildcard $(SRC_DIR)/engine/alo/*.cpp) \
+             $(filter-out $(SRC_DIR)/engine/alo/alodistribute.cpp, $(wildcard $(SRC_DIR)/engine/alo/*.cpp)) \
              $(wildcard $(SRC_DIR)/engine/alo/mod/*.cpp) \
              $(wildcard $(SRC_DIR)/engine/alo/num/*.cpp) \
              $(wildcard $(SRC_DIR)/engine/alo/opt/*.cpp)
@@ -65,6 +65,11 @@ directories:
 $(ALO_LIB): $(ENGINE_OBJ)
 	@mkdir -p $(LIB_DIR)
 	ar rcs $@ $^
+
+# Special rule for alodistribute.cpp to ensure it's compiled first
+$(BUILD_DIR)/engine/alo/alodistribute.o: $(SRC_DIR)/engine/alo/alodistribute.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Compile engine source files
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
@@ -106,15 +111,5 @@ clean:
 # Build everything and run tests
 full: all test test_sleef mpi_test
 
-# Install the library and headers (optional)
-install: all
-	mkdir -p /usr/local/include/alo
-	mkdir -p /usr/local/lib
-	cp -r $(SRC_DIR)/engine/alo/*.h /usr/local/include/alo/
-	cp -r $(SRC_DIR)/engine/alo/mod/*.h /usr/local/include/alo/mod/
-	cp -r $(SRC_DIR)/engine/alo/num/*.h /usr/local/include/alo/num/
-	cp -r $(SRC_DIR)/engine/alo/opt/*.h /usr/local/include/alo/opt/
-	cp $(ALO_LIB) /usr/local/lib/
-
 # Phony targets
-.PHONY: all directories tests test test_sleef mpi_test clean full install
+.PHONY: all directories tests test test_sleef mpi_test clean full
