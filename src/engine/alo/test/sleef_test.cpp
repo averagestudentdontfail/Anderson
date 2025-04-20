@@ -5,8 +5,8 @@
 #include <chrono>
 #include <immintrin.h>
 #include <sleef.h>
-#include "../engine/alo/opt/simd.h"
-#include "../engine/alo/opt/vector.h"
+#include "../opt/simd.h"
+#include "../opt/vector.h"
 
 using namespace engine::alo::opt;
 

@@ -170,6 +170,39 @@ public:
      */
     static void bsCall(const double* S, const double* K, const double* r, const double* q, 
                       const double* vol, const double* T, double* result, size_t size);
+
+    /**
+     * @brief Optimized fused operation: exp(x)*sqrt(y)
+     * 
+     * Computes the operation in a single pass to avoid temporary arrays and
+     * multiple passes through memory, providing better performance.
+     * 
+     * @param x First input array
+     * @param y Second input array (must be non-negative for sqrt)
+     * @param result Output array
+     * @param size Number of elements
+     */
+    static void expMultSqrt(const double* x, const double* y, double* result, size_t size);
+
+    /**
+     * @brief Generic binary operator template for fused operations
+     * 
+     * This template allows implementing other binary operations with similar structure
+     * 
+     * @tparam Op1 First operation
+     * @tparam Op2 Second operation 
+     * @tparam CombineOp Operation to combine results
+     * @param a First input array
+     * @param b Second input array
+     * @param result Output array
+     * @param size Number of elements
+     * @param op1 First operation to apply
+     * @param op2 Second operation to apply
+     * @param combineOp Operation to combine results
+     */
+    template<typename Op1, typename Op2, typename CombineOp>
+    static void binaryFusedOp(const double* a, const double* b, double* result, size_t size,
+                          Op1 op1, Op2 op2, CombineOp combineOp);
 };
 
 } // namespace opt

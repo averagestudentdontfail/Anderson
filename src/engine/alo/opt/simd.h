@@ -316,7 +316,7 @@ public:
      */
     static inline __m256d exp(__m256d x) {
         // Use SLEEF's optimized exponential function for AVX2
-        return Sleef_expd4_u10(x);
+        return Sleef_expd4_u10avx2(x);
     }
    
     /**
@@ -327,79 +327,122 @@ public:
      */
     static inline __m256d log(__m256d x) {
         // Use SLEEF's optimized log function for AVX2
-        return Sleef_logd4_u10(x);
+        return Sleef_logd4_u10avx2(x);
     }
 
     /**
-     * @brief Error function of a vector using SLEEF approximation
+     * @brief Error function of a vector using polynomial approximation
      * 
      * @param x Input vector
      * @return Vector containing erf(x)
      */
     static inline __m256d erf(__m256d x) {
-        // SLEEF doesn't provide a direct erf function, so we'll use an approximation
-        // based on the relationship between erf and the normal CDF:
-        // erf(x) = 2 * CDF(sqrt(2) * x) - 1
-        
-        const __m256d TWO = _mm256_set1_pd(2.0);
+        // Using Abramowitz and Stegun 7.1.26 approximation for erf
+        // erf(x) = 1 - (a₁t + a₂t² + a₃t³ + a₄t⁴ + a₅t⁵)e^(-x²) 
+        // where t = 1/(1 + px), p = 0.3275911
         const __m256d ONE = _mm256_set1_pd(1.0);
-        const __m256d SQRT_2 = _mm256_set1_pd(M_SQRT2);
+        const __m256d NEG_ONE = _mm256_set1_pd(-1.0);
         
-        // Calculate sqrt(2) * x
-        __m256d scaled_x = _mm256_mul_pd(SQRT_2, x);
+        // Handle sign of x separately - erf is an odd function
+        __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x); // |x|
+        __m256d sign_x = _mm256_or_pd(
+            _mm256_and_pd(x, _mm256_set1_pd(-0.0)),
+            ONE
+        ); // sign(x) = x < 0 ? -1 : 1
         
-        // Calculate the CDF
-        __m256d cdf = normalCDF(scaled_x);
+        // Constants for A&S approximation
+        const __m256d a1 = _mm256_set1_pd(0.254829592);
+        const __m256d a2 = _mm256_set1_pd(-0.284496736);
+        const __m256d a3 = _mm256_set1_pd(1.421413741);
+        const __m256d a4 = _mm256_set1_pd(-1.453152027);
+        const __m256d a5 = _mm256_set1_pd(1.061405429);
+        const __m256d p = _mm256_set1_pd(0.3275911);
         
-        // Calculate 2 * CDF - 1
-        __m256d result = _mm256_mul_pd(TWO, cdf);
-        result = _mm256_sub_pd(result, ONE);
+        // Calculate t = 1.0 / (1.0 + p * |x|)
+        __m256d t = _mm256_div_pd(ONE, _mm256_add_pd(ONE, _mm256_mul_pd(p, abs_x)));
+        
+        // Calculate polynomial
+        __m256d poly = a1;
+        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), a2);
+        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), a3);
+        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), a4);
+        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), a5);
+        poly = _mm256_mul_pd(poly, t);
+        
+        // Calculate exp(-x²)
+        __m256d x_squared = _mm256_mul_pd(abs_x, abs_x);
+        __m256d exp_term = Sleef_expd4_u10avx2(_mm256_mul_pd(NEG_ONE, x_squared));
+        
+        // Multiply polynomial by exp term
+        __m256d error_term = _mm256_mul_pd(poly, exp_term);
+        
+        // Calculate erf(x) = sign(x) * (1 - error_term)
+        __m256d abs_erf = _mm256_sub_pd(ONE, error_term);
+        
+        // Apply sign - erf is an odd function
+        __m256d pos_mask = _mm256_cmp_pd(x, _mm256_setzero_pd(), _CMP_GE_OQ);
+        __m256d result = _mm256_blendv_pd(
+            _mm256_mul_pd(abs_erf, NEG_ONE), // negative x: -abs_erf
+            abs_erf,                         // positive x: abs_erf
+            pos_mask
+        );
         
         return result;
     }
 
     /**
-     * @brief Normal CDF calculation using SLEEF approximation
-     * 
-     * @param x Input vector
-     * @return Vector containing normalCDF(x)
-     */
+    * @brief Normal CDF calculation using Abramowitz & Stegun approximation
+    * 
+    * @param x Input vector
+    * @return Vector containing normalCDF(x)
+    */
     static inline __m256d normalCDF(__m256d x) {
-        // Constants for approximation
-        const __m256d HALF = _mm256_set1_pd(0.5);
+        // Constants for the A&S 26.2.17 approximation
+        const __m256d b1 = _mm256_set1_pd(0.31938153);
+        const __m256d b2 = _mm256_set1_pd(-0.356563782);
+        const __m256d b3 = _mm256_set1_pd(1.781477937);
+        const __m256d b4 = _mm256_set1_pd(-1.821255978);
+        const __m256d b5 = _mm256_set1_pd(1.330274429);
+        const __m256d p = _mm256_set1_pd(0.2316419);
         const __m256d ONE = _mm256_set1_pd(1.0);
-        const __m256d SQRT_2_INV = _mm256_set1_pd(M_SQRT1_2);
-        const __m256d NEG_HALF = _mm256_set1_pd(-0.5);
+        const __m256d INV_SQRT_2PI = _mm256_set1_pd(0.3989422804); // 1/sqrt(2π)
         
-        // Optimized implementation of normal CDF using the error function
-        // approximation: normalCDF(x) = 0.5 * (1 + erf(x/sqrt(2)))
+        // Get absolute values and sign mask
+        __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x);
+        __m256d sign_mask = _mm256_cmp_pd(x, _mm256_setzero_pd(), _CMP_GE_OQ);
         
-        // Handle extreme values efficiently
-        __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x); // absolute value
-        __m256d large_mask = _mm256_cmp_pd(abs_x, _mm256_set1_pd(6.0), _CMP_GT_OQ);
+        // Handle extreme values
+        __m256d large_mask = _mm256_cmp_pd(abs_x, _mm256_set1_pd(8.0), _CMP_GT_OQ);
+        __m256d extreme_result = _mm256_blendv_pd(_mm256_setzero_pd(), ONE, sign_mask);
         
-        // For large positive values, CDF ≈ 1.0
-        // For large negative values, CDF ≈ 0.0
-        __m256d pos_mask = _mm256_cmp_pd(x, _mm256_setzero_pd(), _CMP_GT_OQ);
-        __m256d extreme_values = _mm256_blendv_pd(_mm256_setzero_pd(), ONE, pos_mask);
+        // Calculate t = 1.0 / (1.0 + p * |x|)
+        __m256d t = _mm256_div_pd(ONE, _mm256_add_pd(ONE, _mm256_mul_pd(p, abs_x)));
         
-        // Calculate x/sqrt(2)
-        __m256d scaled_x = _mm256_mul_pd(x, SQRT_2_INV);
+        // Calculate polynomial
+        __m256d poly = b1;
+        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b2);
+        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b3);
+        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b4);
+        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b5);
+        poly = _mm256_mul_pd(poly, t);
         
-        // Calculate approximate error function using SLEEF
-        // SLEEF doesn't provide erf directly, so we use a rational approximation
+        // Calculate exp(-x²/2) term
+        __m256d x_squared = _mm256_mul_pd(abs_x, abs_x);
+        __m256d neg_half_x_squared = _mm256_mul_pd(_mm256_set1_pd(-0.5), x_squared);
+        __m256d exp_term = Sleef_expd4_u10avx2(neg_half_x_squared);
         
-        // Use SLEEF tanh which can be used to compute an approximation of erf
-        // erf(x) ≈ tanh(1.2732395447351628 * x)
-        __m256d erf_scale = _mm256_set1_pd(1.2732395447351628); // 4/π
-        __m256d scaled_for_erf = _mm256_mul_pd(scaled_x, erf_scale);
-        __m256d erf_result = Sleef_tanhd4_u10(scaled_for_erf);
+        // Calculate Z = exp(-x²/2) / sqrt(2π)
+        __m256d z = _mm256_mul_pd(exp_term, INV_SQRT_2PI);
         
-        // Compute CDF from erf
-        __m256d cdf_result = _mm256_mul_pd(HALF, _mm256_add_pd(ONE, erf_result));
+        // Calculate poly * z
+        __m256d term = _mm256_mul_pd(poly, z);
+        
+        // For x >= 0: 1.0 - term
+        // For x < 0: term
+        __m256d normal_result = _mm256_blendv_pd(term, _mm256_sub_pd(ONE, term), sign_mask);
         
         // Blend extreme values and computed values
-        return _mm256_blendv_pd(cdf_result, extreme_values, large_mask);
+        return _mm256_blendv_pd(normal_result, extreme_result, large_mask);
     }
     
     /**
@@ -417,7 +460,7 @@ public:
         __m256d exponent = _mm256_mul_pd(NEG_HALF, x_squared);
         
         // Use SLEEF's exponential function
-        __m256d exp_term = Sleef_expd4_u10(exponent);
+        __m256d exp_term = Sleef_expd4_u10avx2(exponent);
         
         return _mm256_mul_pd(exp_term, INV_SQRT_2PI);
     }
@@ -442,7 +485,7 @@ public:
         
         // Calculate log(S/K) using SLEEF
         __m256d S_div_K = _mm256_div_pd(S, K);
-        __m256d log_S_div_K = Sleef_logd4_u10(S_div_K);
+        __m256d log_S_div_K = Sleef_logd4_u10avx2(S_div_K);
         
         // Calculate drift term
         __m256d r_minus_q = _mm256_sub_pd(r, q);
@@ -513,8 +556,8 @@ public:
         // Calculate discount factors with SLEEF
         __m256d neg_r_T = _mm256_mul_pd(_mm256_sub_pd(zero, r), T);
         __m256d neg_q_T = _mm256_mul_pd(_mm256_sub_pd(zero, q), T);
-        __m256d dr = Sleef_expd4_u10(neg_r_T);
-        __m256d dq = Sleef_expd4_u10(neg_q_T);
+        __m256d dr = Sleef_expd4_u10avx2(neg_r_T);
+        __m256d dq = Sleef_expd4_u10avx2(neg_q_T);
         
         // K * e^(-rT) * N(-d2)
         __m256d term1 = _mm256_mul_pd(K, dr);
@@ -572,8 +615,8 @@ public:
         // Calculate discount factors with SLEEF
         __m256d neg_r_T = _mm256_mul_pd(_mm256_sub_pd(zero, r), T);
         __m256d neg_q_T = _mm256_mul_pd(_mm256_sub_pd(zero, q), T);
-        __m256d dr = Sleef_expd4_u10(neg_r_T);
-        __m256d dq = Sleef_expd4_u10(neg_q_T);
+        __m256d dr = Sleef_expd4_u10avx2(neg_r_T);
+        __m256d dq = Sleef_expd4_u10avx2(neg_q_T);
         
         // S * e^(-qT) * N(d1)
         __m256d term1 = _mm256_mul_pd(S, dq);
@@ -622,26 +665,26 @@ public:
     }
     
     /**
-     * @brief SLEEF-powered AVX512 implementations when available
+     * @brief SLEEF-powered AVX2 implementations for additional functions
      */
     static inline __m256d pow(__m256d x, __m256d y) {
-        return Sleef_powd4_u10(x, y);
+        return Sleef_powd4_u10avx2(x, y);
     }
     
     static inline __m256d sin(__m256d x) {
-        return Sleef_sind4_u10(x);
+        return Sleef_sind4_u10avx2(x);
     }
     
     static inline __m256d cos(__m256d x) {
-        return Sleef_cosd4_u10(x);
+        return Sleef_cosd4_u10avx2(x);
     }
     
     static inline __m256d tan(__m256d x) {
-        return Sleef_tand4_u10(x);
+        return Sleef_tand4_u10avx2(x);
     }
     
     static inline __m256d tanh(__m256d x) {
-        return Sleef_tanhd4_u10(x);
+        return Sleef_tanhd4_u10avx2(x);
     }
 };
 
