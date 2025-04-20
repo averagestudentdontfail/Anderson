@@ -9,154 +9,9 @@
 #include <cstring>  
 #include <cstdint>  
 
-// Platform-specific headers for CPU feature detection
-#if defined(_MSC_VER)
-    // MSVC
-    #include <intrin.h>
-#elif defined(__GNUC__) || defined(__clang__)
-    // GCC or Clang
-    #include <cpuid.h>
-#endif
-
 namespace engine {
 namespace alo {
 namespace opt {
-
-/**
- * @brief SIMD support detection and CPU feature detection
- */
-class SimdDetect {
-public:
-    /**
-     * @brief Check if AVX2 instructions are supported
-     * 
-     * @return True if AVX2 is supported, false otherwise
-     */
-    static bool hasAVX2() {
-        static const bool has_avx2 = checkAVX2Support();
-        return has_avx2;
-    }
-    
-    /**
-     * @brief Check if AVX-512 instructions are supported
-     * 
-     * @return True if AVX-512 is supported, false otherwise
-     */
-    static bool hasAVX512() {
-        static const bool has_avx512 = checkAVX512Support();
-        return has_avx512;
-    }
-    
-private:
-    static bool checkAVX2Support() {
-        // Cross-platform implementation of AVX2 detection
-#if defined(_MSC_VER)
-        // MSVC implementation
-        int cpuInfo[4];
-        int nIds = 0;
-        
-        __cpuidex(cpuInfo, 0, 0);
-        nIds = cpuInfo[0];
-        
-        bool avxSupported = false;
-        bool avx2Supported = false;
-        
-        if (nIds >= 1) {
-            __cpuidex(cpuInfo, 1, 0);
-            avxSupported = (cpuInfo[2] & (1 << 28)) != 0;  // Check for AVX
-        }
-        
-        if (nIds >= 7) {
-            __cpuidex(cpuInfo, 7, 0);
-            avx2Supported = (cpuInfo[1] & (1 << 5)) != 0;  // Check for AVX2
-        }
-        
-        return avxSupported && avx2Supported;
-#elif defined(__GNUC__) || defined(__clang__)
-        // GCC or Clang implementation
-        unsigned int eax, ebx, ecx, edx;
-        
-        // Check for basic CPUID support
-        if (__get_cpuid_max(0, nullptr) < 7) {
-            return false;
-        }
-        
-        // Check for AVX support (CPUID.1:ECX.AVX[bit 28])
-        __cpuid(1, eax, ebx, ecx, edx);
-        bool avxSupported = (ecx & (1 << 28)) != 0;
-        
-        // Check for AVX2 support (CPUID.7.0:EBX.AVX2[bit 5])
-        __cpuid_count(7, 0, eax, ebx, ecx, edx);
-        bool avx2Supported = (ebx & (1 << 5)) != 0;
-        
-        return avxSupported && avx2Supported;
-#else
-        // Fallback for other platforms - assume AVX2 is not available
-        return false;
-#endif
-    }
-
-    static bool checkAVX512Support() {
-        // Cross-platform implementation of AVX-512 detection
-#if defined(_MSC_VER)
-        // MSVC implementation
-        int cpuInfo[4];
-        int nIds = 0;
-        
-        __cpuidex(cpuInfo, 0, 0);
-        nIds = cpuInfo[0];
-        
-        if (nIds >= 7) {
-            __cpuidex(cpuInfo, 7, 0);
-            // Check for AVX-512 Foundation
-            return (cpuInfo[1] & (1 << 16)) != 0;
-        }
-        
-        return false;
-#elif defined(__GNUC__) || defined(__clang__)
-        // GCC or Clang implementation
-        unsigned int eax, ebx, ecx, edx;
-        
-        // Check for basic CPUID support
-        if (__get_cpuid_max(0, nullptr) < 7) {
-            return false;
-        }
-        
-        // Check for AVX-512 Foundation (CPUID.7.0:EBX.AVX512F[bit 16])
-        __cpuid_count(7, 0, eax, ebx, ecx, edx);
-        return (ebx & (1 << 16)) != 0;
-#else
-        // Fallback for other platforms - assume AVX-512 is not available
-        return false;
-#endif
-    }
-};
-
-/**
- * @brief Check if SIMD optimization is available
- * 
- * @return True if SIMD optimization is available, false otherwise
- */
-inline bool isSimdAvailable() {
-    return SimdDetect::hasAVX2();
-}
-
-/**
- * @brief Threshold for using SIMD operations
- * 
- * Only use SIMD for operations with size >= this threshold
- */
-constexpr size_t SIMD_THRESHOLD = 32;
-
-/**
- * @brief Check if we should use SIMD for a given data size
- * 
- * @param size Size of the data to process
- * @return True if SIMD should be used, false otherwise
- */
-inline bool shouldUseSimd(size_t size) {
-    return isSimdAvailable() && size >= SIMD_THRESHOLD;
-}
 
 /**
  * @class SimdOps
@@ -298,7 +153,7 @@ public:
     }
     
     /**
-     * @brief Square root of a vector using SLEEF or AVX2
+     * @brief Square root of a vector using AVX2
      * 
      * @param x Input vector
      * @return Vector containing sqrt(x)
@@ -331,118 +186,69 @@ public:
     }
 
     /**
-     * @brief Error function of a vector using polynomial approximation
+     * @brief Error function of a vector using SLEEF
      * 
      * @param x Input vector
      * @return Vector containing erf(x)
      */
     static inline __m256d erf(__m256d x) {
-        // Using Abramowitz and Stegun 7.1.26 approximation for erf
-        // erf(x) = 1 - (a₁t + a₂t² + a₃t³ + a₄t⁴ + a₅t⁵)e^(-x²) 
-        // where t = 1/(1 + px), p = 0.3275911
-        const __m256d ONE = _mm256_set1_pd(1.0);
-        const __m256d NEG_ONE = _mm256_set1_pd(-1.0);
-        
-        // Handle sign of x separately - erf is an odd function
-        __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x); // |x|
-        __m256d sign_x = _mm256_or_pd(
-            _mm256_and_pd(x, _mm256_set1_pd(-0.0)),
-            ONE
-        ); // sign(x) = x < 0 ? -1 : 1
-        
-        // Constants for A&S approximation
-        const __m256d a1 = _mm256_set1_pd(0.254829592);
-        const __m256d a2 = _mm256_set1_pd(-0.284496736);
-        const __m256d a3 = _mm256_set1_pd(1.421413741);
-        const __m256d a4 = _mm256_set1_pd(-1.453152027);
-        const __m256d a5 = _mm256_set1_pd(1.061405429);
-        const __m256d p = _mm256_set1_pd(0.3275911);
-        
-        // Calculate t = 1.0 / (1.0 + p * |x|)
-        __m256d t = _mm256_div_pd(ONE, _mm256_add_pd(ONE, _mm256_mul_pd(p, abs_x)));
-        
-        // Calculate polynomial
-        __m256d poly = a1;
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), a2);
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), a3);
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), a4);
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), a5);
-        poly = _mm256_mul_pd(poly, t);
-        
-        // Calculate exp(-x²)
-        __m256d x_squared = _mm256_mul_pd(abs_x, abs_x);
-        __m256d exp_term = Sleef_expd4_u10avx2(_mm256_mul_pd(NEG_ONE, x_squared));
-        
-        // Multiply polynomial by exp term
-        __m256d error_term = _mm256_mul_pd(poly, exp_term);
-        
-        // Calculate erf(x) = sign(x) * (1 - error_term)
-        __m256d abs_erf = _mm256_sub_pd(ONE, error_term);
-        
-        // Apply sign - erf is an odd function
-        __m256d pos_mask = _mm256_cmp_pd(x, _mm256_setzero_pd(), _CMP_GE_OQ);
-        __m256d result = _mm256_blendv_pd(
-            _mm256_mul_pd(abs_erf, NEG_ONE), // negative x: -abs_erf
-            abs_erf,                         // positive x: abs_erf
-            pos_mask
-        );
-        
-        return result;
+        // Use SLEEF's native erf function for AVX2
+        return Sleef_erfd4_u10avx2(x);
+    }
+    
+    /**
+     * @brief Complementary error function of a vector using SLEEF
+     * 
+     * @param x Input vector
+     * @return Vector containing erfc(x)
+     */
+    static inline __m256d erfc(__m256d x) {
+        // Use SLEEF's native erfc function for AVX2
+        return Sleef_erfcd4_u15avx2(x);
     }
 
     /**
-    * @brief Normal CDF calculation using Abramowitz & Stegun approximation
-    * 
-    * @param x Input vector
-    * @return Vector containing normalCDF(x)
-    */
+     * @brief Normal CDF calculation
+     * 
+     * Uses the numerically stable approach based on erf and erfc
+     * - For moderate values: N(x) = 0.5*(1 + erf(x/sqrt(2)))
+     * - For large negative x: N(x) = 0.5*erfc(-x/sqrt(2))
+     * - For large positive x: N(x) = 1 - 0.5*erfc(x/sqrt(2))
+     * 
+     * @param x Input vector
+     * @return Vector containing normalCDF(x)
+     */
     static inline __m256d normalCDF(__m256d x) {
-        // Constants for the A&S 26.2.17 approximation
-        const __m256d b1 = _mm256_set1_pd(0.31938153);
-        const __m256d b2 = _mm256_set1_pd(-0.356563782);
-        const __m256d b3 = _mm256_set1_pd(1.781477937);
-        const __m256d b4 = _mm256_set1_pd(-1.821255978);
-        const __m256d b5 = _mm256_set1_pd(1.330274429);
-        const __m256d p = _mm256_set1_pd(0.2316419);
         const __m256d ONE = _mm256_set1_pd(1.0);
-        const __m256d INV_SQRT_2PI = _mm256_set1_pd(0.3989422804); // 1/sqrt(2π)
+        const __m256d HALF = _mm256_set1_pd(0.5);
+        const __m256d SQRT2 = _mm256_set1_pd(M_SQRT2);
         
-        // Get absolute values and sign mask
+        // Get absolute value and sign masks for condition testing
         __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x);
-        __m256d sign_mask = _mm256_cmp_pd(x, _mm256_setzero_pd(), _CMP_GE_OQ);
-        
-        // Handle extreme values
+        __m256d neg_mask = _mm256_cmp_pd(x, _mm256_setzero_pd(), _CMP_LT_OQ);
         __m256d large_mask = _mm256_cmp_pd(abs_x, _mm256_set1_pd(8.0), _CMP_GT_OQ);
-        __m256d extreme_result = _mm256_blendv_pd(_mm256_setzero_pd(), ONE, sign_mask);
         
-        // Calculate t = 1.0 / (1.0 + p * |x|)
-        __m256d t = _mm256_div_pd(ONE, _mm256_add_pd(ONE, _mm256_mul_pd(p, abs_x)));
+        // For normal range values (-8 to 8), use erf
+        __m256d scaled_x = _mm256_div_pd(x, SQRT2);
+        __m256d erf_scaled = Sleef_erfd4_u10avx2(scaled_x);
+        __m256d normal_result = _mm256_mul_pd(_mm256_add_pd(ONE, erf_scaled), HALF);
         
-        // Calculate polynomial
-        __m256d poly = b1;
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b2);
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b3);
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b4);
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b5);
-        poly = _mm256_mul_pd(poly, t);
+        // For extreme values, calculate using erfc for better numerical stability
+        __m256d neg_scaled_x = _mm256_sub_pd(_mm256_setzero_pd(), scaled_x);
+        __m256d erfc_result;
         
-        // Calculate exp(-x²/2) term
-        __m256d x_squared = _mm256_mul_pd(abs_x, abs_x);
-        __m256d neg_half_x_squared = _mm256_mul_pd(_mm256_set1_pd(-0.5), x_squared);
-        __m256d exp_term = Sleef_expd4_u10avx2(neg_half_x_squared);
+        // For negative large x: N(x) = 0.5*erfc(-x/sqrt(2))
+        __m256d large_neg_result = _mm256_mul_pd(HALF, Sleef_erfcd4_u15avx2(neg_scaled_x));
         
-        // Calculate Z = exp(-x²/2) / sqrt(2π)
-        __m256d z = _mm256_mul_pd(exp_term, INV_SQRT_2PI);
+        // For positive large x: N(x) = 1 - 0.5*erfc(x/sqrt(2))
+        __m256d large_pos_result = _mm256_sub_pd(ONE, 
+                                  _mm256_mul_pd(HALF, Sleef_erfcd4_u15avx2(scaled_x)));
         
-        // Calculate poly * z
-        __m256d term = _mm256_mul_pd(poly, z);
+        // Blend results based on sign of x for large values
+        erfc_result = _mm256_blendv_pd(large_pos_result, large_neg_result, neg_mask);
         
-        // For x >= 0: 1.0 - term
-        // For x < 0: term
-        __m256d normal_result = _mm256_blendv_pd(term, _mm256_sub_pd(ONE, term), sign_mask);
-        
-        // Blend extreme values and computed values
-        return _mm256_blendv_pd(normal_result, extreme_result, large_mask);
+        // Blend final result based on magnitude
+        return _mm256_blendv_pd(normal_result, erfc_result, large_mask);
     }
     
     /**
@@ -536,11 +342,6 @@ public:
         __m256d K_minus_S = _mm256_sub_pd(K, S);
         __m256d degenerate_value = _mm256_max_pd(zero, K_minus_S);
         
-        // If all are degenerate, just return the intrinsic values
-        if (_mm256_movemask_pd(degenerate_mask) == 0xF) {
-            return degenerate_value;
-        }
-        
         // Calculate d1 and d2
         __m256d d1 = bsD1(S, K, r, q, vol, T);
         __m256d d2 = bsD2(d1, vol, T);
@@ -598,11 +399,6 @@ public:
         // Calculate S-K for degenerate cases
         __m256d S_minus_K = _mm256_sub_pd(S, K);
         __m256d degenerate_value = _mm256_max_pd(zero, S_minus_K);
-        
-        // If all are degenerate, just return the intrinsic values
-        if (_mm256_movemask_pd(degenerate_mask) == 0xF) {
-            return degenerate_value;
-        }
         
         // Calculate d1 and d2
         __m256d d1 = bsD1(S, K, r, q, vol, T);

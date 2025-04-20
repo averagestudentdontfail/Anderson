@@ -59,20 +59,13 @@ public:
     /**
      * @brief Compute normal CDF of array elements using SLEEF
      * 
-     * @param x Input array
-     * @param result Output array
-     * @param size Number of elements
-     */
-    static void normalCDF(const double* x, double* result, size_t size);
-    
-    /**
-     * @brief Compute high-precision normal CDF of array elements
+     * Uses the numerically stable approach based on erf/erfc
      * 
      * @param x Input array
      * @param result Output array
      * @param size Number of elements
      */
-    static void normalCDFHighPrecision(const double* x, double* result, size_t size);
+    static void normalCDF(const double* x, double* result, size_t size);
     
     /**
      * @brief Compute normal PDF of array elements using SLEEF
@@ -153,6 +146,8 @@ public:
     /**
      * @brief Batch compute Black-Scholes put prices with SLEEF acceleration
      * 
+     * Uses high-precision implementation with SLEEF
+     * 
      * @param S Spot prices
      * @param K Strike prices
      * @param r Risk-free rates
@@ -167,6 +162,8 @@ public:
     
     /**
      * @brief Batch compute Black-Scholes call prices with SLEEF acceleration
+     * 
+     * Uses high-precision implementation with SLEEF
      * 
      * @param S Spot prices
      * @param K Strike prices
@@ -220,58 +217,6 @@ public:
      */
     static void discountedNormal(const double* x, const double* r, const double* T, 
                                 double* result, size_t size);
-
-    /**
-     * @brief High-precision Black-Scholes put calculation
-     * 
-     * @param S Spot prices
-     * @param K Strike prices
-     * @param r Risk-free rates
-     * @param q Dividend yields
-     * @param vol Volatilities
-     * @param T Times to maturity
-     * @param result Output array for put prices
-     * @param size Number of options
-     */
-    static void bsPutHighPrecision(const double* S, const double* K, const double* r, 
-                                  const double* q, const double* vol, const double* T, 
-                                  double* result, size_t size);
-
-    /**
-     * @brief High-precision Black-Scholes call calculation
-     * 
-     * @param S Spot prices
-     * @param K Strike prices
-     * @param r Risk-free rates
-     * @param q Dividend yields
-     * @param vol Volatilities
-     * @param T Times to maturity
-     * @param result Output array for call prices
-     * @param size Number of options
-     */
-    static void bsCallHighPrecision(const double* S, const double* K, const double* r, 
-                                   const double* q, const double* vol, const double* T, 
-                                   double* result, size_t size);
-
-    /**
-     * @brief Generic binary operator template for fused operations
-     * 
-     * This template allows implementing other binary operations with similar structure
-     * 
-     * @tparam Op1 First operation
-     * @tparam Op2 Second operation 
-     * @tparam CombineOp Operation to combine results
-     * @param a First input array
-     * @param b Second input array
-     * @param result Output array
-     * @param size Number of elements
-     * @param op1 First operation to apply
-     * @param op2 Second operation to apply
-     * @param combineOp Operation to combine results
-     */
-    template<typename Op1, typename Op2, typename CombineOp>
-    static void binaryFusedOp(const double* a, const double* b, double* result, size_t size,
-                          Op1 op1, Op2 op2, CombineOp combineOp);
 };
 
 } // namespace opt

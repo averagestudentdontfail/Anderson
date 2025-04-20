@@ -152,7 +152,7 @@ void runBatchPricingTest() {
     
     std::cout << "\nPerformance:\n";
     std::cout << "  Batch Pricing Time:      " << batchTime << " ms\n";
-    std::cout << "  Individual Pricing Time: " << individualTime / strikes.size() << " ms\n";
+    std::cout << "  Individual Pricing Time: " << individualTime / strikes.size() << " ms per option\n";
     std::cout << "  Speedup:                 " << (individualTime / strikes.size()) / (batchTime / strikes.size()) << "x\n";
 }
  
@@ -214,19 +214,6 @@ void runParallelPricingTest() {
  */
 void runSimdOptimizationTest() {
     std::cout << "\n=== SIMD Optimization Test ===\n";
-    
-    // Check if SIMD is available
-    bool hasAvx2 = opt::SimdDetect::hasAVX2();
-    bool hasAvx512 = opt::SimdDetect::hasAVX512();
-    
-    std::cout << "SIMD Support:\n";
-    std::cout << "  AVX2:   " << (hasAvx2 ? "Yes" : "No") << "\n";
-    std::cout << "  AVX512: " << (hasAvx512 ? "Yes" : "No") << "\n\n";
-    
-    if (!hasAvx2) {
-        std::cout << "SIMD optimization test skipped (AVX2 not available)\n";
-        return;
-    }
     
     // Create test data
     constexpr size_t dataSize = 1000000;

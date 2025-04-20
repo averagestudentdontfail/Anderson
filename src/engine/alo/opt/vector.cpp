@@ -10,6 +10,11 @@ namespace engine {
 namespace alo {
 namespace opt {
 
+// Since we removed SIMD detection, we redefine shouldUseSimd to just check the size threshold
+inline bool shouldUseSimd(size_t size) {
+    return size >= 32;  // Only use SIMD for operations with size >= 32
+}
+
 /**
  * @brief Vectorized operations for arrays of data
  */
@@ -93,21 +98,11 @@ void VectorMath::erf(const double* x, double* result, size_t size) {
         return;
     }
     
-    // Constants for tanh-based approximation of erf
-    const double SCALE = 1.2732395447351628; // 4/π
-    const double SQRT_2 = M_SQRT2;
-    
-    // Process in chunks of 4 using SLEEF-based approximation
+    // Process in chunks of 4 using SLEEF's native erf function
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
         __m256d vec = _mm256_loadu_pd(x + i);
-        
-        // Scale inputs for tanh approximation
-        __m256d scaled = _mm256_mul_pd(vec, _mm256_set1_pd(SCALE * SQRT_2));
-        
-        // Use SLEEF tanh for erf approximation
-        __m256d res = Sleef_tanhd4_u10avx2(scaled);
-        
+        __m256d res = Sleef_erfd4_u10avx2(vec);
         _mm256_storeu_pd(result + i, res);
     }
     
@@ -121,82 +116,22 @@ void VectorMath::normalCDF(const double* x, double* result, size_t size) {
     // Use scalar operations for small data sizes
     if (!shouldUseSimd(size)) {
         for (size_t i = 0; i < size; ++i) {
-            result[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
+            // Choose the most numerically stable formula based on the value of x
+            if (x[i] < -8.0) {
+                // For large negative x, use erfc-based formula
+                result[i] = 0.5 * std::erfc(-x[i] / std::sqrt(2.0));
+            } else if (x[i] > 8.0) {
+                // For large positive x, result is very close to 1
+                result[i] = 1.0 - 0.5 * std::erfc(x[i] / std::sqrt(2.0));
+            } else {
+                // For moderate values, use erf-based formula
+                result[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
+            }
         }
         return;
     }
     
-    // Process in chunks of 4 using the improved A&S implementation
-    size_t i = 0;
-    for (; i + 3 < size; i += 4) {
-        __m256d x_vec = _mm256_loadu_pd(x + i);
-        
-        // Constants for the A&S 26.2.17 approximation
-        const __m256d b1 = _mm256_set1_pd(0.31938153);
-        const __m256d b2 = _mm256_set1_pd(-0.356563782);
-        const __m256d b3 = _mm256_set1_pd(1.781477937);
-        const __m256d b4 = _mm256_set1_pd(-1.821255978);
-        const __m256d b5 = _mm256_set1_pd(1.330274429);
-        const __m256d p = _mm256_set1_pd(0.2316419);
-        const __m256d ONE = _mm256_set1_pd(1.0);
-        const __m256d INV_SQRT_2PI = _mm256_set1_pd(0.3989422804); // 1/sqrt(2π)
-        
-        // Get absolute values and sign mask
-        __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x_vec);
-        __m256d sign_mask = _mm256_cmp_pd(x_vec, _mm256_setzero_pd(), _CMP_GE_OQ);
-        
-        // Handle extreme values
-        __m256d large_mask = _mm256_cmp_pd(abs_x, _mm256_set1_pd(8.0), _CMP_GT_OQ);
-        __m256d extreme_result = _mm256_blendv_pd(_mm256_setzero_pd(), ONE, sign_mask);
-        
-        // Calculate t = 1.0 / (1.0 + p * |x|)
-        __m256d t = _mm256_div_pd(ONE, _mm256_add_pd(ONE, _mm256_mul_pd(p, abs_x)));
-        
-        // Calculate polynomial
-        __m256d poly = b1;
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b2);
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b3);
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b4);
-        poly = _mm256_add_pd(_mm256_mul_pd(poly, t), b5);
-        poly = _mm256_mul_pd(poly, t);
-        
-        // Calculate exp(-x²/2) term
-        __m256d x_squared = _mm256_mul_pd(abs_x, abs_x);
-        __m256d neg_half_x_squared = _mm256_mul_pd(_mm256_set1_pd(-0.5), x_squared);
-        __m256d exp_term = Sleef_expd4_u10avx2(neg_half_x_squared);
-        
-        // Calculate Z = exp(-x²/2) / sqrt(2π)
-        __m256d z = _mm256_mul_pd(exp_term, INV_SQRT_2PI);
-        
-        // Calculate poly * z
-        __m256d term = _mm256_mul_pd(poly, z);
-        
-        // For x >= 0: 1.0 - term
-        // For x < 0: term
-        __m256d normal_result = _mm256_blendv_pd(term, _mm256_sub_pd(ONE, term), sign_mask);
-        
-        // Blend extreme values and computed values
-        __m256d result_vec = _mm256_blendv_pd(normal_result, extreme_result, large_mask);
-        
-        _mm256_storeu_pd(result + i, result_vec);
-    }
-    
-    // Handle remaining elements
-    for (; i < size; ++i) {
-        result[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
-    }
-}
-
-void VectorMath::normalCDFHighPrecision(const double* x, double* result, size_t size) {
-    // Use scalar operations for small data sizes
-    if (!shouldUseSimd(size)) {
-        for (size_t i = 0; i < size; ++i) {
-            result[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
-        }
-        return;
-    }
-    
-    // Process in chunks of 4 using SLEEF's native erf function
+    // Process in chunks of 4 using SLEEF with appropriate formula
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
         __m256d x_vec = _mm256_loadu_pd(x + i);
@@ -204,21 +139,47 @@ void VectorMath::normalCDFHighPrecision(const double* x, double* result, size_t 
         // Scale for normal CDF: x/sqrt(2)
         __m256d scaled_x = _mm256_div_pd(x_vec, _mm256_set1_pd(M_SQRT2));
         
-        // Use SLEEF's native erf function
-        __m256d erf_x = Sleef_erfd4_u10avx2(scaled_x);
+        // Get absolute value and sign masks for condition testing
+        __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x_vec);
+        __m256d neg_mask = _mm256_cmp_pd(x_vec, _mm256_setzero_pd(), _CMP_LT_OQ);
+        __m256d large_mask = _mm256_cmp_pd(abs_x, _mm256_set1_pd(8.0), _CMP_GT_OQ);
         
-        // Calculate 0.5 * (1 + erf(x/sqrt(2)))
+        // For normal range values (-8 to 8), use erf
+        __m256d erf_scaled = Sleef_erfd4_u10avx2(scaled_x);
         __m256d one = _mm256_set1_pd(1.0);
         __m256d half = _mm256_set1_pd(0.5);
-        __m256d result_vec = _mm256_mul_pd(_mm256_add_pd(one, erf_x), half);
+        __m256d normal_result = _mm256_mul_pd(_mm256_add_pd(one, erf_scaled), half);
         
-        // Store results
+        // For extreme values, calculate using erfc for better numerical stability
+        __m256d neg_scaled_x = _mm256_sub_pd(_mm256_setzero_pd(), scaled_x);
+        __m256d erfc_result;
+        
+        // For negative large x
+        __m256d large_neg_result = _mm256_mul_pd(half, Sleef_erfcd4_u15avx2(neg_scaled_x));
+        
+        // For positive large x
+        __m256d large_pos_result = _mm256_sub_pd(one, 
+                                  _mm256_mul_pd(half, Sleef_erfcd4_u15avx2(scaled_x)));
+        
+        // Blend results based on sign of x for large values
+        erfc_result = _mm256_blendv_pd(large_pos_result, large_neg_result, neg_mask);
+        
+        // Blend final result based on magnitude
+        __m256d result_vec = _mm256_blendv_pd(normal_result, erfc_result, large_mask);
+        
+        // Store result
         _mm256_storeu_pd(result + i, result_vec);
     }
     
     // Handle remaining elements
     for (; i < size; ++i) {
-        result[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
+        if (x[i] < -8.0) {
+            result[i] = 0.5 * std::erfc(-x[i] / std::sqrt(2.0));
+        } else if (x[i] > 8.0) {
+            result[i] = 1.0 - 0.5 * std::erfc(x[i] / std::sqrt(2.0));
+        } else {
+            result[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
+        }
     }
 }
 
@@ -468,36 +429,86 @@ void VectorMath::bsD2(const double* d1, const double* vol, const double* T,
 
 void VectorMath::bsPut(const double* S, const double* K, const double* r, const double* q, 
                       const double* vol, const double* T, double* result, size_t size) {
-    // Just call our high-precision implementation
-    bsPutHighPrecision(S, K, r, q, vol, T, result, size);
+    // Allocate temporary arrays for intermediate results
+    std::vector<double> d1(size);
+    std::vector<double> d2(size);
+    std::vector<double> neg_d1(size);
+    std::vector<double> neg_d2(size);
+    std::vector<double> Nd1(size);
+    std::vector<double> Nd2(size);
+
+    // Calculate d1 and d2 in a single pass
+    bsD1D2(S, K, r, q, vol, T, d1.data(), d2.data(), size);
+
+    // Negate d1 and d2 for put formula
+    for (size_t i = 0; i < size; i++) {
+        neg_d1[i] = -d1[i];
+        neg_d2[i] = -d2[i];
+    }
+
+    // Use normalCDF implementation
+    normalCDF(neg_d1.data(), Nd1.data(), size);
+    normalCDF(neg_d2.data(), Nd2.data(), size);
+    
+    // Calculate discount factors
+    std::vector<double> discount_r(size);
+    std::vector<double> discount_q(size);
+
+    for (size_t i = 0; i < size; i++) {
+        discount_r[i] = std::exp(-r[i] * T[i]);
+        discount_q[i] = std::exp(-q[i] * T[i]);
+    }
+
+    // Calculate final put price
+    for (size_t i = 0; i < size; i++) {
+        // Handle degenerate cases
+        if (vol[i] <= 0.0 || T[i] <= 0.0) {
+            result[i] = std::max(0.0, K[i] - S[i]);
+            continue;
+        }
+
+        double term1 = K[i] * discount_r[i] * Nd2[i];
+        double term2 = S[i] * discount_q[i] * Nd1[i];
+        result[i] = term1 - term2;
+    }
 }
 
-void VectorMath::bsCall(const double* S, const double* K, const double* r, const double* q, 
-                       const double* vol, const double* T, double* result, size_t size) {
-    // Use scalar operations for small data sizes
-    if (!shouldUseSimd(size)) {
-        for (size_t i = 0; i < size; ++i) {
-            // Handle degenerate cases
-            if (vol[i] <= 0.0 || T[i] <= 0.0) {
-                result[i] = std::max(0.0, S[i] - K[i]);
-                continue;
-            }
-            
-            // Calculate Black-Scholes
-            double d1 = (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) 
-                      / (vol[i] * std::sqrt(T[i]));
-            double d2 = d1 - vol[i] * std::sqrt(T[i]);
-            
-            double Nd1 = 0.5 * (1.0 + std::erf(d1 / std::sqrt(2.0)));
-            double Nd2 = 0.5 * (1.0 + std::erf(d2 / std::sqrt(2.0)));
-            
-            result[i] = S[i] * std::exp(-q[i] * T[i]) * Nd1 - K[i] * std::exp(-r[i] * T[i]) * Nd2;
-        }
-        return;
+void VectorMath::bsCall(const double* S, const double* K, const double* r,
+                       const double* q, const double* vol, const double* T,
+                       double* result, size_t size) {
+    // Allocate temporary arrays for intermediate results
+    std::vector<double> d1(size);
+    std::vector<double> d2(size);
+    std::vector<double> Nd1(size);
+    std::vector<double> Nd2(size);
+    std::vector<double> discount_r(size);
+    std::vector<double> discount_q(size);
+    
+    // Calculate d1 and d2 in a single pass
+    bsD1D2(S, K, r, q, vol, T, d1.data(), d2.data(), size);
+    
+    // Calculate N(d1) and N(d2) using high precision function
+    normalCDF(d1.data(), Nd1.data(), size);
+    normalCDF(d2.data(), Nd2.data(), size);
+    
+    // Calculate discount factors
+    for (size_t i = 0; i < size; i++) {
+        discount_r[i] = std::exp(-r[i] * T[i]);
+        discount_q[i] = std::exp(-q[i] * T[i]);
     }
     
-    // Use high-precision implementation here too
-    bsCallHighPrecision(S, K, r, q, vol, T, result, size);
+    // Calculate final call price: S * e^(-qT) * N(d1) - K * e^(-rT) * N(d2)
+    for (size_t i = 0; i < size; i++) {
+        // Handle degenerate cases
+        if (vol[i] <= 0.0 || T[i] <= 0.0) {
+            result[i] = std::max(0.0, S[i] - K[i]);
+            continue;
+        }
+        
+        double term1 = S[i] * discount_q[i] * Nd1[i];
+        double term2 = K[i] * discount_r[i] * Nd2[i];
+        result[i] = term1 - term2;
+    }
 }
 
 void VectorMath::expMultSqrt(const double* x, const double* y, double* result, size_t size) {
@@ -537,7 +548,7 @@ void VectorMath::expMultSqrt(const double* x, const double* y, double* result, s
 
 void VectorMath::bsD1D2(const double* S, const double* K, const double* r, const double* q, 
                       const double* vol, const double* T, double* d1, double* d2, size_t size) {
-    // Use scalar operations for small data sizes or when SIMD isn't available
+    // Use scalar operations for small data sizes
     if (!shouldUseSimd(size)) {
         for (size_t i = 0; i < size; ++i) {
             // Handle degenerate cases
@@ -628,7 +639,7 @@ void VectorMath::bsD1D2(const double* S, const double* K, const double* r, const
 
 void VectorMath::discountedNormal(const double* x, const double* r, const double* T, 
                                  double* result, size_t size) {
-    // Use scalar operations for small data sizes or when SIMD isn't available
+    // Use scalar operations for small data sizes
     if (!shouldUseSimd(size)) {
         for (size_t i = 0; i < size; ++i) {
             // Calculate discount factor
@@ -657,15 +668,13 @@ void VectorMath::discountedNormal(const double* x, const double* r, const double
         );
         __m256d discount = Sleef_expd4_u10avx2(neg_r_T);
         
-        // Calculate normal CDF with temporary array
-        double normal_values[4];
-        _mm256_storeu_pd(normal_values, x_vec);
-        
-        for (int j = 0; j < 4; j++) {
-            normal_values[j] = 0.5 * (1.0 + std::erf(normal_values[j] / std::sqrt(2.0)));
-        }
-        
-        __m256d normal = _mm256_loadu_pd(normal_values);
+        // Calculate normal CDF
+        __m256d scaled_x = _mm256_div_pd(x_vec, _mm256_set1_pd(M_SQRT2));
+        __m256d erf_scaled = Sleef_erfd4_u10avx2(scaled_x);
+        __m256d normal = _mm256_mul_pd(
+            _mm256_set1_pd(0.5),
+            _mm256_add_pd(_mm256_set1_pd(1.0), erf_scaled)
+        );
         
         // Multiply discount by normal
         __m256d result_vec = _mm256_mul_pd(discount, normal);
@@ -682,92 +691,7 @@ void VectorMath::discountedNormal(const double* x, const double* r, const double
     }
 }
 
-void VectorMath::bsPutHighPrecision(const double *S, const double *K,
-                                    const double *r, const double *q,
-                                    const double *vol, const double *T,
-                                    double *result, size_t size) {
-  // Allocate temporary arrays for intermediate results
-  std::vector<double> d1(size);
-  std::vector<double> d2(size);
-  std::vector<double> neg_d1(size);
-  std::vector<double> neg_d2(size);
-  std::vector<double> Nd1(size);
-  std::vector<double> Nd2(size);
-
-  // Calculate d1 and d2 in a single pass
-  bsD1D2(S, K, r, q, vol, T, d1.data(), d2.data(), size);
-
-  // Negate d1 and d2 for put formula
-  for (size_t i = 0; i < size; i++) {
-    neg_d1[i] = -d1[i];
-    neg_d2[i] = -d2[i];
-  }
-
-  // Use the SLEEF-based normalCDFHighPrecision implementation
-  normalCDFHighPrecision(neg_d1.data(), Nd1.data(), size);
-  normalCDFHighPrecision(neg_d2.data(), Nd2.data(), size);
-
-  // Calculate discount factors
-  std::vector<double> discount_r(size);
-  std::vector<double> discount_q(size);
-
-  for (size_t i = 0; i < size; i++) {
-    discount_r[i] = std::exp(-r[i] * T[i]);
-    discount_q[i] = std::exp(-q[i] * T[i]);
-  }
-
-  // Calculate final put price
-  for (size_t i = 0; i < size; i++) {
-    // Handle degenerate cases
-    if (vol[i] <= 0.0 || T[i] <= 0.0) {
-      result[i] = std::max(0.0, K[i] - S[i]);
-      continue;
-    }
-
-    double term1 = K[i] * discount_r[i] * Nd2[i];
-    double term2 = S[i] * discount_q[i] * Nd1[i];
-    result[i] = term1 - term2;
-  }
-}
-
-void VectorMath::bsCallHighPrecision(const double* S, const double* K, const double* r,
-                                    const double* q, const double* vol, const double* T,
-                                    double* result, size_t size) {
-    // Allocate temporary arrays for intermediate results
-    std::vector<double> d1(size);
-    std::vector<double> d2(size);
-    std::vector<double> Nd1(size);
-    std::vector<double> Nd2(size);
-    std::vector<double> discount_r(size);
-    std::vector<double> discount_q(size);
-    
-    // Calculate d1 and d2 in a single pass
-    bsD1D2(S, K, r, q, vol, T, d1.data(), d2.data(), size);
-    
-    // Calculate N(d1) and N(d2) using high precision function
-    normalCDFHighPrecision(d1.data(), Nd1.data(), size);
-    normalCDFHighPrecision(d2.data(), Nd2.data(), size);
-    
-    // Calculate discount factors
-    for (size_t i = 0; i < size; i++) {
-        discount_r[i] = std::exp(-r[i] * T[i]);
-        discount_q[i] = std::exp(-q[i] * T[i]);
-    }
-    
-    // Calculate final call price: S * e^(-qT) * N(d1) - K * e^(-rT) * N(d2)
-    for (size_t i = 0; i < size; i++) {
-        // Handle degenerate cases
-        if (vol[i] <= 0.0 || T[i] <= 0.0) {
-            result[i] = std::max(0.0, S[i] - K[i]);
-            continue;
-        }
-        
-        double term1 = S[i] * discount_q[i] * Nd1[i];
-        double term2 = K[i] * discount_r[i] * Nd2[i];
-        result[i] = term1 - term2;
-    }
-}
-
 } // namespace opt
 } // namespace alo
 } // namespace engine
+    //
