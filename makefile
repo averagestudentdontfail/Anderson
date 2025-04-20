@@ -2,7 +2,7 @@
 
 # Compiler settings
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -march=native -mavx2 -ffast-math -fopenmp
+CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -march=native -mavx2 -ffast-math
 
 # Directories
 SRC_DIR = src
@@ -11,15 +11,14 @@ BIN_DIR = bin
 LIB_DIR = lib
 TEST_DIR = test
 
-# Check if MPI is available
-HAS_MPI := $(shell which mpicc 2>/dev/null)
-ifdef HAS_MPI
-    CXXFLAGS += -DUSE_MPI
-    LDFLAGS += -lmpi
-endif
-
 # OpenMP flags
 OMPFLAGS = -fopenmp
+CXXFLAGS += $(OMPFLAGS)
+
+# MPI configuration - use mpicc to get the correct flags
+MPI_COMPILE_FLAGS := $(shell mpic++ --showme:compile)
+MPI_LINK_FLAGS := $(shell mpic++ --showme:link)
+CXXFLAGS += $(MPI_COMPILE_FLAGS) -DUSE_MPI
 
 # Sleef library - Updated paths to match your project structure
 SLEEF_INCLUDE = -I$(CURDIR)/vec/include
@@ -47,6 +46,7 @@ ALO_LIB = $(LIB_DIR)/libalo.a
 # Test executables
 TEST_EXEC = $(BIN_DIR)/alo_test
 SLEEF_TEST = $(BIN_DIR)/sleef_test
+MPI_TEST = $(BIN_DIR)/mpi_test
 
 # Default target
 all: directories $(ALO_LIB) tests
@@ -68,18 +68,26 @@ $(ALO_LIB): $(ENGINE_OBJ)
 # Compile engine source files
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Build the tests
 tests: $(TEST_EXEC) $(SLEEF_TEST)
 
 $(TEST_EXEC): $(BUILD_DIR)/engine/alo/test/alo_test.o $(ALO_LIB)
 	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB)
+	$(CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB)
 
 $(SLEEF_TEST): $(BUILD_DIR)/engine/alo/test/sleef_test.o $(ALO_LIB)
 	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB)
+	$(CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB)
+
+# MPI test
+mpi_test: $(MPI_TEST)
+	mpirun -np 4 ./$(BIN_DIR)/mpi_test
+
+$(MPI_TEST): $(BUILD_DIR)/engine/alo/test/mpi_test.o $(ALO_LIB)
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB) $(MPI_LINK_FLAGS)
 
 # Run tests
 test: $(TEST_EXEC)
@@ -88,16 +96,6 @@ test: $(TEST_EXEC)
 test_sleef: $(SLEEF_TEST)
 	./$(SLEEF_TEST)
 
-# MPI distributed version (optional)
-ifdef HAS_MPI
-mpi_test: $(BIN_DIR)/mpi_test
-	mpirun -np 4 ./$(BIN_DIR)/mpi_test
-
-$(BIN_DIR)/mpi_test: $(BUILD_DIR)/engine/alo/test/mpi_test.o $(ALO_LIB)
-	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB) -lmpi
-endif
-
 # Clean build files
 clean:
 	rm -rf $(BUILD_DIR)
@@ -105,7 +103,7 @@ clean:
 	rm -rf $(LIB_DIR)
 
 # Build everything and run tests
-full: all test test_sleef
+full: all test test_sleef mpi_test
 
 # Install the library and headers (optional)
 install: all
@@ -118,7 +116,4 @@ install: all
 	cp $(ALO_LIB) /usr/local/lib/
 
 # Phony targets
-.PHONY: all directories tests test test_sleef clean full install
-ifdef HAS_MPI
-.PHONY: mpi_test
-endif
+.PHONY: all directories tests test test_sleef mpi_test clean full install

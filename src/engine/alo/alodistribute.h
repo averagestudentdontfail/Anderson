@@ -7,7 +7,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <mpi.h>
-#include "../aloengine.h"
+#include "aloengine.h"
 
 namespace engine {
 namespace alo {
