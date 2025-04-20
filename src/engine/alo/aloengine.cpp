@@ -15,6 +15,10 @@
 #include <thread>
 #include <array>
 #include <vector>
+#include <cstring> // For std::memcpy
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace engine {
 namespace alo {
@@ -93,13 +97,18 @@ void ALOEngine::clearCache() const {
     // Clear both the legacy cache and the new thread-local cache
     opt::getThreadLocalCache().clear();
     
+    // Also clear the global tiered cache
+    opt::getTieredPricingCache().clear();
+    
     // Also clear the legacy string cache for backward compatibility
     legacy_cache_.clear();
 }
  
 size_t ALOEngine::getCacheSize() const {
-    // Return combined size of both caches
-    return opt::getThreadLocalCache().size() + legacy_cache_.size();
+    // Return combined size of all caches
+    return opt::getThreadLocalCache().size() + 
+           opt::getTieredPricingCache().sharedSize() + 
+           legacy_cache_.size();
 }
  
 double ALOEngine::blackScholesPut(double S, double K, double r, double q, double vol, double T) {
@@ -230,7 +239,7 @@ double ALOEngine::calculatePutImpl(double S, double K, double r, double q, doubl
     // Create efficient binary cache key
     opt::OptionParams params{S, K, r, q, vol, T, 0}; // 0 = PUT
     
-    // Use thread-local cache with optimized key
+    // Use tiered cache for maximum performance
     return opt::getCachedPrice(params, [&]() {
         // Handle special cases from the paper
         if (r < 0.0 && q < r) {
@@ -354,7 +363,54 @@ void ALOEngine::processAmericanPutChunk(const double* S, const double* K, const 
         });
     }
 }
- 
+
+// NEW OPTIMIZED IMPLEMENTATION - SIMD Chunk Processing
+void ALOEngine::processSIMDChunk(double S, const double* strikes, double r, double q, 
+                          double vol, double T, double* results, size_t size) const {
+    // Process in SIMD width (4 for AVX2) chunks
+    size_t i = 0;
+    
+    // Fast path for European-only condition (r <= 0.0 && r <= q)
+    bool use_european = (r <= 0.0 && r <= q);
+    
+    // Check for degenerate cases
+    if (vol <= 0.0 || T <= 0.0) {
+        for (size_t j = 0; j < size; ++j) {
+            results[j] = std::max(0.0, strikes[j] - S);
+        }
+        return;
+    }
+    
+    if (use_european) {
+        // Vectorized European pricing using opt::VectorMath
+        // Create arrays with constant values for the parameters except strikes
+        std::vector<double> spots(size, S);
+        std::vector<double> rates(size, r);
+        std::vector<double> dividends(size, q);
+        std::vector<double> vols(size, vol);
+        std::vector<double> times(size, T);
+        
+        opt::VectorMath::bsPut(spots.data(), strikes, rates.data(), dividends.data(), 
+                              vols.data(), times.data(), results, size);
+    } else {
+        // Process in groups of 4 using SIMD
+        for (; i + 3 < size; i += 4) {
+            // Structure of Arrays (SoA) layout for better SIMD efficiency
+            std::array<double, 4> K = {strikes[i], strikes[i+1], strikes[i+2], strikes[i+3]};
+            std::array<double, 4> prices = calculatePut4(S, K, r, q, vol, T);
+            
+            // Store results contiguously
+            std::memcpy(results + i, prices.data(), 4 * sizeof(double));
+        }
+        
+        // Handle remainder with scalar code
+        for (; i < size; ++i) {
+            results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
+        }
+    }
+}
+
+// NEW OPTIMIZED IMPLEMENTATION - Batch Calculate Put
 std::vector<double> ALOEngine::batchCalculatePut(double S, const std::vector<double>& strikes,
                                               double r, double q, double vol, double T) const {
     const size_t n = strikes.size();
@@ -365,8 +421,9 @@ std::vector<double> ALOEngine::batchCalculatePut(double S, const std::vector<dou
     // Check for European-only condition once (r <= 0.0 && r <= q)
     bool use_european = (r <= 0.0 && r <= q);
     
-    // Strategy 1: For very small batches, use scalar computation
-    if (n <= 4) {
+    // Determine optimal processing strategy based on batch size
+    if (n <= 8) {
+        // Strategy 1: For very small batches, use scalar computation
         if (use_european) {
             for (size_t i = 0; i < n; ++i) {
                 results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
@@ -376,81 +433,18 @@ std::vector<double> ALOEngine::batchCalculatePut(double S, const std::vector<dou
                 results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
             }
         }
-        return results;
+    } 
+    else if (n <= 128) {
+        // Strategy 2: For small-to-medium batches, use SIMD optimized processing
+        processSIMDChunk(S, strikes.data(), r, q, vol, T, results.data(), n);
     }
-    
-    // Strategy 2: For small-to-medium batches, use SIMD
-    if (n <= 64) {
-        // European options are easier to vectorize efficiently
-        if (use_european) {
-            constexpr size_t VECTOR_SIZE = 4;
-            size_t i = 0;
-            
-            // Process in groups of 4 using SIMD
-            for (; i + VECTOR_SIZE - 1 < n; i += VECTOR_SIZE) {
-                std::array<double, VECTOR_SIZE> K_batch = {
-                    strikes[i], strikes[i+1], strikes[i+2], strikes[i+3]
-                };
-                std::array<double, VECTOR_SIZE> S_batch = {S, S, S, S};
-                std::array<double, VECTOR_SIZE> r_batch = {r, r, r, r};
-                std::array<double, VECTOR_SIZE> q_batch = {q, q, q, q};
-                std::array<double, VECTOR_SIZE> vol_batch = {vol, vol, vol, vol};
-                std::array<double, VECTOR_SIZE> T_batch = {T, T, T, T};
-                std::array<double, VECTOR_SIZE> result_batch;
-                
-                // Use optimized vectorized Black-Scholes
-                opt::VectorMath::bsPut(
-                    S_batch.data(), K_batch.data(), r_batch.data(), q_batch.data(),
-                    vol_batch.data(), T_batch.data(), result_batch.data(), VECTOR_SIZE
-                );
-                
-                // Copy results back
-                for (size_t j = 0; j < VECTOR_SIZE; ++j) {
-                    results[i + j] = result_batch[j];
-                }
-            }
-            
-            // Handle remaining options
-            for (; i < n; ++i) {
-                results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
-            }
-        } 
-        else {
-            // For American options, use the calculatePut4 method for groups of 4
-            constexpr size_t VECTOR_SIZE = 4;
-            size_t i = 0;
-            
-            // Process in groups of 4
-            for (; i + VECTOR_SIZE - 1 < n; i += VECTOR_SIZE) {
-                std::array<double, VECTOR_SIZE> strike_batch = {
-                    strikes[i], strikes[i+1], strikes[i+2], strikes[i+3]
-                };
-                
-                // Use optimized batch American put calculation
-                auto result_batch = calculatePut4(S, strike_batch, r, q, vol, T);
-                
-                // Copy results back
-                for (size_t j = 0; j < VECTOR_SIZE; ++j) {
-                    results[i + j] = result_batch[j];
-                }
-            }
-            
-            // Handle remaining options individually
-            for (; i < n; ++i) {
-                results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
-            }
-        }
-        
-        return results;
-    }
-    
-    // Strategy 3: For larger batches (> 64), use parallelized implementation
-    // Process in larger chunks to amortize thread scheduling costs
-    if (n > 64) {
+    else {
+        // Strategy 3: For larger batches, use OpenMP parallelization
+        // Prefer using parallelBatchCalculatePut for large batches
         return parallelBatchCalculatePut(S, strikes, r, q, vol, T);
     }
     
-    return results; // Should never reach here, but added for safety
+    return results;
 }
  
 std::vector<double> ALOEngine::batchCalculatePut(double S, 
@@ -472,49 +466,13 @@ std::vector<double> ALOEngine::batchCalculatePut(double S,
         return results;
     }
     
-    // For larger batches, set up chunked processing
-    constexpr size_t CHUNK_SIZE = 64;
-    
-    // Prepare parameter arrays for vectorized processing
-    std::vector<double> S_vec(CHUNK_SIZE, S);
-    std::vector<double> K_vec(CHUNK_SIZE);
-    std::vector<double> r_vec(CHUNK_SIZE);
-    std::vector<double> q_vec(CHUNK_SIZE);
-    std::vector<double> vol_vec(CHUNK_SIZE);
-    std::vector<double> T_vec(CHUNK_SIZE);
-    std::vector<double> chunk_results(CHUNK_SIZE);
-    
-    // Process in chunks
-    for (size_t start = 0; start < n; start += CHUNK_SIZE) {
-        const size_t end = std::min(start + CHUNK_SIZE, n);
-        const size_t chunk_size = end - start;
-        
-        // For small remaining chunks, use scalar processing
-        if (chunk_size < 8) {
-            for (size_t i = start; i < end; ++i) {
-                const auto& [K, r, q, vol, T] = options[i];
-                results[i] = calculatePutImpl(S, K, r, q, vol, T);
-            }
-            continue;
-        }
-        
-        // Extract parameters to contiguous buffers
-        for (size_t i = 0; i < chunk_size; ++i) {
-            const auto& [K, r, q, vol, T] = options[i + start];
-            K_vec[i] = K;
-            r_vec[i] = r;
-            q_vec[i] = q;
-            vol_vec[i] = vol;
-            T_vec[i] = T;
-        }
-        
-        // Use vectorized processing for this chunk
-        processAmericanPutChunk(S_vec.data(), K_vec.data(), r_vec.data(), q_vec.data(), 
-                               vol_vec.data(), T_vec.data(), chunk_results.data(), chunk_size);
-        
-        // Copy results back
-        std::copy(chunk_results.begin(), chunk_results.begin() + chunk_size, 
-                 results.begin() + start);
+    // For larger batches, parallelize with OpenMP if available
+    #ifdef _OPENMP
+    #pragma omp parallel for schedule(dynamic, 16)
+    #endif
+    for (size_t i = 0; i < n; ++i) {
+        const auto& [K, r, q, vol, T] = options[i];
+        results[i] = calculatePutImpl(S, K, r, q, vol, T);
     }
     
     return results;
@@ -597,12 +555,28 @@ std::vector<double> ALOEngine::batchCalculateCall(double S, const std::vector<do
     bool use_european = (q <= 0.0 || (r < 0.0 && q >= r));
     
     if (use_european) {
-        // Use direct Black-Scholes for European options
-        for (size_t i = 0; i < n; ++i) {
-            results[i] = blackScholesCall(S, strikes[i], r, q, vol, T);
+        // For small batches, use scalar computation
+        if (n <= 8) {
+            for (size_t i = 0; i < n; ++i) {
+                results[i] = blackScholesCall(S, strikes[i], r, q, vol, T);
+            }
+        } else {
+            // For larger batches, use SIMD where available
+            std::vector<double> spots(n, S);
+            std::vector<double> rates(n, r);
+            std::vector<double> dividends(n, q);
+            std::vector<double> vols(n, vol);
+            std::vector<double> times(n, T);
+            
+            opt::VectorMath::bsCall(spots.data(), strikes.data(), rates.data(), 
+                                  dividends.data(), vols.data(), times.data(), 
+                                  results.data(), n);
         }
     } else {
-        // For all options, use scalar computation with caching
+        // For American calls, parallelize with OpenMP if available
+        #ifdef _OPENMP
+        #pragma omp parallel for schedule(dynamic, 32)
+        #endif
         for (size_t i = 0; i < n; ++i) {
             results[i] = calculateCallImpl(S, strikes[i], r, q, vol, T);
         }
@@ -611,6 +585,7 @@ std::vector<double> ALOEngine::batchCalculateCall(double S, const std::vector<do
     return results;
 }
  
+// NEW OPTIMIZED IMPLEMENTATION - Parallel Batch Calculate Put
 std::vector<double> ALOEngine::parallelBatchCalculatePut(double S, const std::vector<double>& strikes,
                                                      double r, double q, double vol, double T) const {
     const size_t n = strikes.size();
@@ -627,90 +602,40 @@ std::vector<double> ALOEngine::parallelBatchCalculatePut(double S, const std::ve
     // Determine European-only condition once
     bool use_european = (r <= 0.0 && r <= q);
     
-    // Get thread pool
-    auto& pool = get_worker_pool();
-    const unsigned int num_cores = std::thread::hardware_concurrency();
-    
-    // Calculate chunk size to minimize scheduling overhead
-    // Using a hybrid approach: more chunks than cores for better load balancing
-    const unsigned int num_chunks = std::min(static_cast<unsigned int>(n), num_cores * 2);
-    const size_t chunk_size = (n + num_chunks - 1) / num_chunks; // ceiling division
-    
-    // Submit tasks to thread pool with deterministic behavior
-    std::atomic<size_t> completed_chunks(0);
-    const size_t total_chunks = (n + chunk_size - 1) / chunk_size;
-    
-    for (size_t start = 0; start < n; start += chunk_size) {
-        const size_t end = std::min(start + chunk_size, n);
-        
-        pool.enqueue([this, &results, &completed_chunks, S, &strikes, r, q, vol, T, use_european, start, end]() {
-            // Process this chunk with bounded execution time
-            if (use_european) {
-                // Fast path for European options - use vectorized Black-Scholes
-                constexpr size_t VECTOR_SIZE = 4;
-                size_t i = start;
-                
-                // Process in groups of 4 using SIMD
-                for (; i + VECTOR_SIZE - 1 < end; i += VECTOR_SIZE) {
-                    std::array<double, VECTOR_SIZE> K_batch = {
-                        strikes[i], strikes[i+1], strikes[i+2], strikes[i+3]
-                    };
-                    std::array<double, VECTOR_SIZE> S_batch = {S, S, S, S};
-                    std::array<double, VECTOR_SIZE> r_batch = {r, r, r, r};
-                    std::array<double, VECTOR_SIZE> q_batch = {q, q, q, q};
-                    std::array<double, VECTOR_SIZE> vol_batch = {vol, vol, vol, vol};
-                    std::array<double, VECTOR_SIZE> T_batch = {T, T, T, T};
-                    std::array<double, VECTOR_SIZE> result_batch;
-                    
-                    // Use optimized vectorized Black-Scholes
-                    opt::VectorMath::bsPut(
-                        S_batch.data(), K_batch.data(), r_batch.data(), q_batch.data(),
-                        vol_batch.data(), T_batch.data(), result_batch.data(), VECTOR_SIZE
-                    );
-                    
-                    // Copy results back
-                    for (size_t j = 0; j < VECTOR_SIZE; ++j) {
-                        results[i + j] = result_batch[j];
-                    }
-                }
-                
-                // Handle remaining options individually
-                for (; i < end; ++i) {
-                    results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
-                }
-            } else {
-                // For American options, again process in batches of 4 for SIMD efficiency
-                constexpr size_t VECTOR_SIZE = 4;
-                size_t i = start;
-                
-                // Process in groups of 4
-                for (; i + VECTOR_SIZE - 1 < end; i += VECTOR_SIZE) {
-                    std::array<double, VECTOR_SIZE> strike_batch = {
-                        strikes[i], strikes[i+1], strikes[i+2], strikes[i+3]
-                    };
-                    
-                    // Use optimized batch American put calculation
-                    auto result_batch = calculatePut4(S, strike_batch, r, q, vol, T);
-                    
-                    // Copy results back
-                    for (size_t j = 0; j < VECTOR_SIZE; ++j) {
-                        results[i + j] = result_batch[j];
-                    }
-                }
-                
-                // Handle remaining options individually
-                for (; i < end; ++i) {
-                    results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
-                }
+    // OpenMP parallel for with dynamic scheduling for better load balancing
+    #ifdef _OPENMP
+    #pragma omp parallel
+    {
+        // Process in chunks of 64 strikes
+        #pragma omp for schedule(dynamic, 64)
+        for (size_t i = 0; i < n; ++i) {
+            // Check for degenerate cases and European-only condition
+            if (vol <= 0.0 || T <= 0.0) {
+                results[i] = std::max(0.0, strikes[i] - S);
+                continue;
             }
             
-            // Increment completed chunks counter
-            completed_chunks.fetch_add(1);
-        });
+            if (use_european) {
+                // For European options, use Black-Scholes directly
+                results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
+            } else {
+                // For American options, use the full calculation
+                results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
+            }
+        }
     }
-    
-    // Wait for all tasks to complete
-    pool.wait_all();
+    #else
+    // Fallback for systems without OpenMP
+    if (use_european) {
+        for (size_t i = 0; i < n; ++i) {
+            results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
+        }
+    }
+    #endif
     
     return results;
 }

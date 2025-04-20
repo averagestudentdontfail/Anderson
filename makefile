@@ -1,94 +1,124 @@
-# Makefile for building the ALO engine and test program
-# Compiler and flags
-CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -march=native -mavx2 -mfma -I$(CURDIR)/vec/include
-LDFLAGS = -pthread -lm -L$(CURDIR)/vec/lib -lsleef -Wl,-rpath,$(CURDIR)/vec/lib
+# Makefile for ALO Engine Build
 
-# Check for AVX-512 support
-ifeq ($(shell $(CXX) -mavx512f -dM -E - < /dev/null 2>/dev/null | grep -c AVX512F),1)
-    CXXFLAGS += -mavx512f
-endif
+# Compiler settings
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -march=native -mavx2 -ffast-math -fopenmp
 
 # Directories
 SRC_DIR = src
 BUILD_DIR = build
 BIN_DIR = bin
+LIB_DIR = lib
+TEST_DIR = test
+
+# Check if MPI is available
+HAS_MPI := $(shell which mpicc 2>/dev/null)
+ifdef HAS_MPI
+    CXXFLAGS += -DUSE_MPI
+    LDFLAGS += -lmpi
+endif
+
+# OpenMP flags
+OMPFLAGS = -fopenmp
+
+# Sleef library
+SLEEF_INCLUDE = -I/usr/local/include
+SLEEF_LIB = -L/usr/local/lib -lsleef
+
+# Include directories
+INCLUDES = -I$(SRC_DIR) $(SLEEF_INCLUDE)
 
 # Source files
-ENGINE_SOURCES = \
-    $(SRC_DIR)/engine/alo/aloengine.cpp \
-    $(SRC_DIR)/engine/alo/mod/american.cpp \
-    $(SRC_DIR)/engine/alo/mod/european.cpp \
-    $(SRC_DIR)/engine/alo/num/chebyshev.cpp \
-    $(SRC_DIR)/engine/alo/num/integrate.cpp \
-    $(SRC_DIR)/engine/alo/opt/cache.cpp \
-    $(SRC_DIR)/engine/alo/opt/vector.cpp
-
-# Test files
-TEST_SOURCES = \
-    $(SRC_DIR)/engine/alo/test/alo_test.cpp
-
-SLEEF_TEST_SOURCE = $(SRC_DIR)/engine/alo/test/sleef_test.cpp
+ENGINE_SRC = $(wildcard $(SRC_DIR)/engine/alo/*.cpp) \
+             $(wildcard $(SRC_DIR)/engine/alo/mod/*.cpp) \
+             $(wildcard $(SRC_DIR)/engine/alo/num/*.cpp) \
+             $(wildcard $(SRC_DIR)/engine/alo/opt/*.cpp)
 
 # Object files
-ENGINE_OBJECTS = $(ENGINE_SOURCES:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
-TEST_OBJECTS = $(TEST_SOURCES:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
-SLEEF_TEST_OBJECT = $(SLEEF_TEST_SOURCE:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
+ENGINE_OBJ = $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(ENGINE_SRC))
 
-# Target executables
-TARGET = $(BIN_DIR)/alo_test
-SLEEF_TARGET = $(BIN_DIR)/sleef_test
+# Test source files
+TEST_SRC = $(wildcard $(SRC_DIR)/engine/alo/test/*.cpp)
+TEST_OBJ = $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(TEST_SRC))
 
-# Create necessary directories including test directory
-$(shell mkdir -p $(BIN_DIR) $(BUILD_DIR)/engine/alo/mod $(BUILD_DIR)/engine/alo/num $(BUILD_DIR)/engine/alo/opt $(BUILD_DIR)/engine/alo/test)
+# Library output
+ALO_LIB = $(LIB_DIR)/libalo.a
+
+# Test executables
+TEST_EXEC = $(BIN_DIR)/alo_test
+SLEEF_TEST = $(BIN_DIR)/sleef_test
 
 # Default target
-all: $(TARGET) $(SLEEF_TARGET)
+all: directories $(ALO_LIB) tests
 
-# Build target executable
-$(TARGET): $(ENGINE_OBJECTS) $(TEST_OBJECTS)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+# Create directories
+directories:
+	@mkdir -p $(BUILD_DIR)/engine/alo/mod
+	@mkdir -p $(BUILD_DIR)/engine/alo/num
+	@mkdir -p $(BUILD_DIR)/engine/alo/opt
+	@mkdir -p $(BUILD_DIR)/engine/alo/test
+	@mkdir -p $(BIN_DIR)
+	@mkdir -p $(LIB_DIR)
 
-# Build SLEEF test executable
-$(SLEEF_TARGET): $(SLEEF_TEST_OBJECT) $(BUILD_DIR)/engine/alo/opt/vector.o
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+# Build the ALO library
+$(ALO_LIB): $(ENGINE_OBJ)
+	@mkdir -p $(LIB_DIR)
+	ar rcs $@ $^
 
-# Build engine object files
-$(BUILD_DIR)/engine/alo/%.o: $(SRC_DIR)/engine/alo/%.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+# Compile engine source files
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $(INCLUDES) -c $< -o $@
 
-$(BUILD_DIR)/engine/alo/mod/%.o: $(SRC_DIR)/engine/alo/mod/%.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+# Build the tests
+tests: $(TEST_EXEC) $(SLEEF_TEST)
 
-$(BUILD_DIR)/engine/alo/num/%.o: $(SRC_DIR)/engine/alo/num/%.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+$(TEST_EXEC): $(BUILD_DIR)/engine/alo/test/alo_test.o $(ALO_LIB)
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB)
 
-$(BUILD_DIR)/engine/alo/opt/%.o: $(SRC_DIR)/engine/alo/opt/%.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+$(SLEEF_TEST): $(BUILD_DIR)/engine/alo/test/sleef_test.o $(ALO_LIB)
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB)
 
-# Build test object files from engine/alo/test directory
-$(BUILD_DIR)/engine/alo/test/%.o: $(SRC_DIR)/engine/alo/test/%.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+# Run tests
+test: $(TEST_EXEC)
+	./$(TEST_EXEC)
 
-# Clean build artifacts
+test_sleef: $(SLEEF_TEST)
+	./$(SLEEF_TEST)
+
+# MPI distributed version (optional)
+ifdef HAS_MPI
+mpi_test: $(BIN_DIR)/mpi_test
+	mpirun -np 4 ./$(BIN_DIR)/mpi_test
+
+$(BIN_DIR)/mpi_test: $(BUILD_DIR)/engine/alo/test/mpi_test.o $(ALO_LIB)
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB) -lmpi
+endif
+
+# Clean build files
 clean:
-	rm -rf $(BUILD_DIR)/* $(BIN_DIR)/*
+	rm -rf $(BUILD_DIR)
+	rm -rf $(BIN_DIR)
+	rm -rf $(LIB_DIR)
 
-# Run main test program
-test: $(TARGET)
-	./$(TARGET)
+# Build everything and run tests
+full: all test test_sleef
 
-# Run SLEEF test program
-test_sleef: $(SLEEF_TARGET)
-	./$(SLEEF_TARGET)
-
-# Alternate name for the test target
-run: test
-
-# Install
-install: $(TARGET)
-	mkdir -p /usr/local/bin
-	cp $(TARGET) /usr/local/bin/
+# Install the library and headers (optional)
+install: all
+	mkdir -p /usr/local/include/alo
+	mkdir -p /usr/local/lib
+	cp -r $(SRC_DIR)/engine/alo/*.h /usr/local/include/alo/
+	cp -r $(SRC_DIR)/engine/alo/mod/*.h /usr/local/include/alo/mod/
+	cp -r $(SRC_DIR)/engine/alo/num/*.h /usr/local/include/alo/num/
+	cp -r $(SRC_DIR)/engine/alo/opt/*.h /usr/local/include/alo/opt/
+	cp $(ALO_LIB) /usr/local/lib/
 
 # Phony targets
-.PHONY: all clean run test test_sleef install
+.PHONY: all directories tests test test_sleef clean full install
+ifdef HAS_MPI
+.PHONY: mpi_test
+endif
