@@ -27,8 +27,9 @@ SLEEF_LIB = -L$(CURDIR)/vec/lib -lsleef
 # Include directories
 INCLUDES = -I$(SRC_DIR) $(SLEEF_INCLUDE)
 
-# Source files
-ENGINE_SRC = $(wildcard $(SRC_DIR)/engine/alo/*.cpp) \
+# Source files - Explicitly list alodistribute.cpp here
+ENGINE_SRC = $(SRC_DIR)/engine/alo/alodistribute.cpp \
+             $(wildcard $(SRC_DIR)/engine/alo/*.cpp) \
              $(wildcard $(SRC_DIR)/engine/alo/mod/*.cpp) \
              $(wildcard $(SRC_DIR)/engine/alo/num/*.cpp) \
              $(wildcard $(SRC_DIR)/engine/alo/opt/*.cpp)
