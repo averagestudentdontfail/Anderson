@@ -1,6 +1,7 @@
 #include "vector.h"
 #include "simd.h"
 #include <immintrin.h>
+#include <sleef.h>
 #include <algorithm>
 #include <cmath>
 
@@ -20,12 +21,12 @@ void VectorMath::exp(const double* x, double* result, size_t size) {
         return;
     }
     
-    // Process in chunks of 4 using AVX2 with our custom implementation
+    // Process in chunks of 4 using SLEEF's AVX2 implementation
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
         __m256d vec = _mm256_loadu_pd(x + i);
-        // Use our custom exponential implementation
-        __m256d res = SimdOps::exp(vec);
+        // Use SLEEF's optimized exponential function
+        __m256d res = Sleef_expd4_u10(vec);
         _mm256_storeu_pd(result + i, res);
     }
     
@@ -44,12 +45,12 @@ void VectorMath::log(const double* x, double* result, size_t size) {
         return;
     }
     
-    // Process in chunks of 4 using our custom implementation
+    // Process in chunks of 4 using SLEEF
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
         __m256d vec = _mm256_loadu_pd(x + i);
-        // Use our custom logarithm implementation
-        __m256d res = SimdOps::log(vec);
+        // Use SLEEF's optimized logarithm function
+        __m256d res = Sleef_logd4_u10(vec);
         _mm256_storeu_pd(result + i, res);
     }
     
@@ -91,11 +92,21 @@ void VectorMath::erf(const double* x, double* result, size_t size) {
         return;
     }
     
-    // Process in chunks of 4 using our custom implementation
+    // Constants for tanh-based approximation of erf
+    const double SCALE = 1.2732395447351628; // 4/π
+    const double SQRT_2 = M_SQRT2;
+    
+    // Process in chunks of 4 using SLEEF-based approximation
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
         __m256d vec = _mm256_loadu_pd(x + i);
-        __m256d res = SimdOps::erf(vec);
+        
+        // Scale inputs for tanh approximation
+        __m256d scaled = _mm256_mul_pd(vec, _mm256_set1_pd(SCALE * SQRT_2));
+        
+        // Use SLEEF tanh for erf approximation
+        __m256d res = Sleef_tanhd4_u10(scaled);
+        
         _mm256_storeu_pd(result + i, res);
     }
     
@@ -117,7 +128,7 @@ void VectorMath::normalCDF(const double* x, double* result, size_t size) {
         return;
     }
     
-    // Process in chunks of 4 using our custom implementation
+    // Process in chunks of 4 using SLEEF-based implementation
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
         __m256d vec = _mm256_loadu_pd(x + i);
@@ -133,7 +144,7 @@ void VectorMath::normalCDF(const double* x, double* result, size_t size) {
 
 void VectorMath::normalPDF(const double* x, double* result, size_t size) {
     // Normal PDF: (1/sqrt(2π)) * exp(-0.5 * x²)
-    const double INV_SQRT_2PI = 1.0 / std::sqrt(2.0 * M_PI);
+    const double INV_SQRT_2PI = 0.3989422804014327; // 1/sqrt(2*PI)
     
     // Use scalar operations for small data sizes
     if (!shouldUseSimd(size)) {
@@ -143,12 +154,24 @@ void VectorMath::normalPDF(const double* x, double* result, size_t size) {
         return;
     }
     
-    // Process in chunks of 4 using our custom implementation
+    // Process in chunks of 4 using SLEEF
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
-        __m256d vec = _mm256_loadu_pd(x + i);
-        __m256d res = SimdOps::normalPDF(vec);
-        _mm256_storeu_pd(result + i, res);
+        __m256d xvec = _mm256_loadu_pd(x + i);
+        
+        // Square the values
+        __m256d x_squared = _mm256_mul_pd(xvec, xvec);
+        
+        // Multiply by -0.5
+        __m256d scaled = _mm256_mul_pd(x_squared, _mm256_set1_pd(-0.5));
+        
+        // Use SLEEF exp function
+        __m256d exp_term = Sleef_expd4_u10(scaled);
+        
+        // Multiply by 1/sqrt(2π)
+        __m256d pdf = _mm256_mul_pd(exp_term, _mm256_set1_pd(INV_SQRT_2PI));
+        
+        _mm256_storeu_pd(result + i, pdf);
     }
     
     // Handle remaining elements
@@ -269,9 +292,10 @@ void VectorMath::bsD1(const double* S, const double* K, const double* r, const d
         return;
     }
     
-    // Process in chunks of 4 using AVX2
+    // Process in chunks of 4 using SLEEF
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
+        // Load vectors
         __m256d S_vec = _mm256_loadu_pd(S + i);
         __m256d K_vec = _mm256_loadu_pd(K + i);
         __m256d r_vec = _mm256_loadu_pd(r + i);
@@ -279,10 +303,38 @@ void VectorMath::bsD1(const double* S, const double* K, const double* r, const d
         __m256d vol_vec = _mm256_loadu_pd(vol + i);
         __m256d T_vec = _mm256_loadu_pd(T + i);
         
-        // Calculate d1 using our optimized function
-        __m256d d1 = SimdOps::bsD1(S_vec, K_vec, r_vec, q_vec, vol_vec, T_vec);
+        // Calculate sqrt(T)
+        __m256d sqrt_T = _mm256_sqrt_pd(T_vec);
         
-        // Store the result
+        // Calculate vol * sqrt(T)
+        __m256d vol_sqrt_T = _mm256_mul_pd(vol_vec, sqrt_T);
+        
+        // Calculate S/K
+        __m256d S_div_K = _mm256_div_pd(S_vec, K_vec);
+        
+        // Calculate log(S/K) using SLEEF
+        __m256d log_S_div_K = Sleef_logd4_u10(S_div_K);
+        
+        // Calculate 0.5 * vol^2
+        __m256d vol_squared = _mm256_mul_pd(vol_vec, vol_vec);
+        __m256d half_vol_squared = _mm256_mul_pd(_mm256_set1_pd(0.5), vol_squared);
+        
+        // Calculate (r-q)
+        __m256d r_minus_q = _mm256_sub_pd(r_vec, q_vec);
+        
+        // Calculate (r-q) + 0.5*vol^2
+        __m256d drift = _mm256_add_pd(r_minus_q, half_vol_squared);
+        
+        // Calculate drift * T
+        __m256d drift_T = _mm256_mul_pd(drift, T_vec);
+        
+        // Calculate numerator
+        __m256d numerator = _mm256_add_pd(log_S_div_K, drift_T);
+        
+        // Calculate d1 = numerator / (vol * sqrt(T))
+        __m256d d1 = _mm256_div_pd(numerator, vol_sqrt_T);
+        
+        // Store result
         _mm256_storeu_pd(result + i, d1);
     }
     
@@ -308,17 +360,23 @@ void VectorMath::bsD2(const double* d1, const double* vol, const double* T,
         return;
     }
     
-    // Process in chunks of 4 using AVX2
+    // Process in chunks of 4
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
         __m256d d1_vec = _mm256_loadu_pd(d1 + i);
         __m256d vol_vec = _mm256_loadu_pd(vol + i);
         __m256d T_vec = _mm256_loadu_pd(T + i);
         
-        // Calculate d2 = d1 - vol * sqrt(T)
-        __m256d d2 = SimdOps::bsD2(d1_vec, vol_vec, T_vec);
+        // Calculate sqrt(T)
+        __m256d sqrt_T = _mm256_sqrt_pd(T_vec);
         
-        // Store the result
+        // Calculate vol * sqrt(T)
+        __m256d vol_sqrt_T = _mm256_mul_pd(vol_vec, sqrt_T);
+        
+        // Calculate d2 = d1 - vol * sqrt(T)
+        __m256d d2 = _mm256_sub_pd(d1_vec, vol_sqrt_T);
+        
+        // Store result
         _mm256_storeu_pd(result + i, d2);
     }
     
@@ -333,11 +391,13 @@ void VectorMath::bsPut(const double* S, const double* K, const double* r, const 
     // Use scalar operations for small data sizes
     if (!shouldUseSimd(size)) {
         for (size_t i = 0; i < size; ++i) {
+            // Handle degenerate cases
             if (vol[i] <= 0.0 || T[i] <= 0.0) {
                 result[i] = std::max(0.0, K[i] - S[i]);
                 continue;
             }
             
+            // Calculate Black-Scholes
             double d1 = (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) 
                       / (vol[i] * std::sqrt(T[i]));
             double d2 = d1 - vol[i] * std::sqrt(T[i]);
@@ -350,7 +410,7 @@ void VectorMath::bsPut(const double* S, const double* K, const double* r, const 
         return;
     }
     
-    // Process in chunks of 4 using AVX2
+    // Process in chunks of 4 using SLEEF-powered implementation
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
         __m256d S_vec = _mm256_loadu_pd(S + i);
@@ -360,11 +420,11 @@ void VectorMath::bsPut(const double* S, const double* K, const double* r, const 
         __m256d vol_vec = _mm256_loadu_pd(vol + i);
         __m256d T_vec = _mm256_loadu_pd(T + i);
         
-        // Calculate put option price using our optimized function
-        __m256d put_price = SimdOps::bsPut(S_vec, K_vec, r_vec, q_vec, vol_vec, T_vec);
+        // Use SLEEF-powered Black-Scholes implementation
+        __m256d res = SimdOps::bsPut(S_vec, K_vec, r_vec, q_vec, vol_vec, T_vec);
         
-        // Store the result
-        _mm256_storeu_pd(result + i, put_price);
+        // Store result
+        _mm256_storeu_pd(result + i, res);
     }
     
     // Handle remaining elements
@@ -390,11 +450,13 @@ void VectorMath::bsCall(const double* S, const double* K, const double* r, const
     // Use scalar operations for small data sizes
     if (!shouldUseSimd(size)) {
         for (size_t i = 0; i < size; ++i) {
+            // Handle degenerate cases
             if (vol[i] <= 0.0 || T[i] <= 0.0) {
                 result[i] = std::max(0.0, S[i] - K[i]);
                 continue;
             }
             
+            // Calculate Black-Scholes
             double d1 = (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) 
                       / (vol[i] * std::sqrt(T[i]));
             double d2 = d1 - vol[i] * std::sqrt(T[i]);
@@ -407,7 +469,7 @@ void VectorMath::bsCall(const double* S, const double* K, const double* r, const
         return;
     }
     
-    // Process in chunks of 4 using AVX2
+    // Process in chunks of 4 using SLEEF-powered implementation
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
         __m256d S_vec = _mm256_loadu_pd(S + i);
@@ -417,11 +479,11 @@ void VectorMath::bsCall(const double* S, const double* K, const double* r, const
         __m256d vol_vec = _mm256_loadu_pd(vol + i);
         __m256d T_vec = _mm256_loadu_pd(T + i);
         
-        // Calculate call option price using our optimized function
-        __m256d call_price = SimdOps::bsCall(S_vec, K_vec, r_vec, q_vec, vol_vec, T_vec);
+        // Use SLEEF-powered Black-Scholes implementation
+        __m256d res = SimdOps::bsCall(S_vec, K_vec, r_vec, q_vec, vol_vec, T_vec);
         
-        // Store the result
-        _mm256_storeu_pd(result + i, call_price);
+        // Store result
+        _mm256_storeu_pd(result + i, res);
     }
     
     // Handle remaining elements
