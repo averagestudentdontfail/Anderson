@@ -2,8 +2,8 @@
 #include "../mod/american.h"
 #include "../mod/european.h"
 #include "../opt/cache.h"
-#include "../opt/simd.h" // Includes SimdOps
-#include "../opt/vector.h" // Includes VectorMath
+#include "../opt/simd.h"
+#include "../opt/vector.h"
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -11,7 +11,6 @@
 #include <string>
 #include <memory>
 #include <algorithm>
-#include <numeric> // For std::accumulate
 
 using namespace engine::alo;
 
@@ -37,7 +36,7 @@ private:
 };
  
 /**
- * @brief Run a simple pricing test (Unchanged)
+ * @brief Run a simple pricing test
  */
 void runSimplePricingTest() {
     std::cout << "\n=== Simple Pricing Test ===\n";
@@ -90,7 +89,7 @@ void runSimplePricingTest() {
 }
  
 /**
- * @brief Run a batch pricing test (Unchanged)
+ * @brief Run a batch pricing test
  */
 void runBatchPricingTest() {
     std::cout << "\n=== Batch Pricing Test ===\n";
@@ -122,7 +121,7 @@ void runBatchPricingTest() {
     for (double K : strikes) {
         individualPrices.push_back(engine.calculateOption(S, K, r, q, vol, T, PUT));
     }
-    double individualTimeTotal = timer.elapsed(); // Total time for all individual calls
+    double individualTime = timer.elapsed();
     
     // Compute European prices for comparison
     std::vector<double> europeanPrices;
@@ -153,25 +152,12 @@ void runBatchPricingTest() {
     
     std::cout << "\nPerformance:\n";
     std::cout << "  Batch Pricing Time:      " << batchTime << " ms\n";
-    // Calculate time per option for individual calls
-    if (!strikes.empty()) {
-        std::cout << "  Individual Pricing Time: " << individualTimeTotal / strikes.size() << " ms per option\n";
-        // Calculate speedup based on time per option
-        double batchTimePerOption = batchTime / strikes.size();
-        double individualTimePerOption = individualTimeTotal / strikes.size();
-        if (batchTimePerOption > 1e-9) { // Avoid division by zero
-             std::cout << "  Speedup (Individual vs Batch): " << individualTimePerOption / batchTimePerOption << "x\n";
-        } else {
-             std::cout << "  Speedup (Individual vs Batch): N/A (Batch time too small)\n";
-        }
-    } else {
-         std::cout << "  Individual Pricing Time: N/A (no strikes)\n";
-         std::cout << "  Speedup (Individual vs Batch): N/A\n";
-    }
+    std::cout << "  Individual Pricing Time: " << individualTime / strikes.size() << " ms per option\n";
+    std::cout << "  Speedup:                 " << (individualTime / strikes.size()) / (batchTime / strikes.size()) << "x\n";
 }
  
 /**
- * @brief Run a parallel pricing test (Unchanged)
+ * @brief Run a parallel pricing test
  */
 void runParallelPricingTest() {
     std::cout << "\n=== Parallel Pricing Test ===\n";
@@ -205,151 +191,105 @@ void runParallelPricingTest() {
     // Verify results
     bool resultsMatch = true;
     double maxDiff = 0.0;
-    if (seqPrices.size() == parPrices.size()){
-        for (size_t i = 0; i < strikes.size(); ++i) {
-            double diff = std::abs(seqPrices[i] - parPrices[i]);
-            maxDiff = std::max(maxDiff, diff);
-            if (diff > 1e-9) { // Use a slightly larger tolerance for parallel FP differences
-                resultsMatch = false;
-            }
+    for (size_t i = 0; i < strikes.size(); ++i) {
+        double diff = std::abs(seqPrices[i] - parPrices[i]);
+        maxDiff = std::max(maxDiff, diff);
+        if (diff > 1e-10) {
+            resultsMatch = false;
         }
-    } else {
-        resultsMatch = false; // Sizes don't match
     }
-
     
     // Print performance results
     std::cout << std::fixed << std::setprecision(6);
     std::cout << "Performance for " << strikes.size() << " options:\n";
     std::cout << "  Sequential Time:  " << seqTime << " ms\n";
     std::cout << "  Parallel Time:    " << parTime << " ms\n";
-    if (parTime > 1e-9) { // Avoid division by zero
-         std::cout << "  Speedup:          " << seqTime / parTime << "x\n";
-    } else {
-         std::cout << "  Speedup:          N/A (Parallel time too small)\n";
-    }
+    std::cout << "  Speedup:          " << seqTime / parTime << "x\n";
     std::cout << "  Results Match:    " << (resultsMatch ? "Yes" : "No") << "\n";
     std::cout << "  Maximum Difference: " << maxDiff << "\n";
 }
  
 /**
- * @brief Run a SIMD optimization test comparing Standard, Fused SIMD, and Separate SIMD
+ * @brief Run a SIMD optimization test with improved implementation
  */
 void runSimdOptimizationTest() {
-    std::cout << "\n=== SIMD Optimization Test (exp(x) * sqrt(y)) ===\n";
+    std::cout << "\n=== SIMD Optimization Test ===\n";
     
     // Create test data
-    constexpr size_t dataSize = 1000000; // Ensure this is large enough for meaningful timing
-    // Ensure dataSize is a multiple of 4 for easier SIMD handling without remainder loops
-    static_assert(dataSize % 4 == 0, "dataSize must be a multiple of 4 for SIMD tests");
-
+    constexpr size_t dataSize = 1000000;
     std::vector<double> x(dataSize);
     std::vector<double> y(dataSize);
-    std::vector<double> z_std(dataSize);      // Result from standard loop
-    std::vector<double> z_fused(dataSize);    // Result from VectorMath::expMultSqrt
-    std::vector<double> z_separate(dataSize); // Result from separate VectorMath calls
+    std::vector<double> z1(dataSize);
+    std::vector<double> z2(dataSize);
     
-    // Allocate temporary arrays for the separate SIMD approach
-    std::vector<double> temp_exp_x(dataSize);
-    std::vector<double> temp_sqrt_y(dataSize);
-
     // Initialize with some values
     for (size_t i = 0; i < dataSize; ++i) {
-        // Use more reasonable values that avoid numerical overflow/underflow issues
+        // Use more reasonable values that avoid numerical overflow
         x[i] = -5.0 + 10.0 * static_cast<double>(i) / dataSize;  // Range from -5 to 5
-        y[i] = 0.1 + 10.0 * static_cast<double>(i) / dataSize;   // Range from 0.1 to 10.1 (ensure y >= 0 for sqrt)
+        y[i] = 0.1 + 10.0 * static_cast<double>(i) / dataSize;   // Range from 0.1 to 10.1
     }
     
+    // Test vector operations (standard)
     Timer timer;
-    
-    // --- 1. Standard Calculation ---
-    timer.reset();
     for (size_t i = 0; i < dataSize; ++i) {
-        z_std[i] = std::exp(x[i]) * std::sqrt(y[i]);
+        z1[i] = std::exp(x[i]) * std::sqrt(y[i]);
     }
     double standardTime = timer.elapsed();
-    double sumStd = std::accumulate(z_std.begin(), z_std.end(), 0.0);
-
-    // --- 2. Fused SIMD Calculation ---
+    
+    // Test vector operations (SIMD with fused operation)
     timer.reset();
-    opt::VectorMath::expMultSqrt(x.data(), y.data(), z_fused.data(), dataSize);
-    double fusedSimdTime = timer.elapsed();
-    double sumFused = std::accumulate(z_fused.begin(), z_fused.end(), 0.0);
-
-    // --- 3. Separate SIMD Calculation ---
-    timer.reset();
-    opt::VectorMath::exp(x.data(), temp_exp_x.data(), dataSize);
-    opt::VectorMath::sqrt(y.data(), temp_sqrt_y.data(), dataSize);
-    opt::VectorMath::multiply(temp_exp_x.data(), temp_sqrt_y.data(), z_separate.data(), dataSize);
-    double separateSimdTime = timer.elapsed();
-    double sumSeparate = std::accumulate(z_separate.begin(), z_separate.end(), 0.0);
-
-    // --- Verification ---
-    double maxAbsDiffFused = 0.0;
-    double maxRelDiffFused = 0.0;
-    double maxAbsDiffSeparate = 0.0;
-    double maxRelDiffSeparate = 0.0;
-
+    opt::VectorMath::expMultSqrt(x.data(), y.data(), z2.data(), dataSize);
+    double simdTime = timer.elapsed();
+    
+    // Verify results
+    double maxAbsDiff = 0.0;
+    double maxRelDiff = 0.0;
+    double sumStd = 0.0;
+    double sumSimd = 0.0;
+    
     for (size_t i = 0; i < dataSize; ++i) {
-        // Compare Fused SIMD vs Standard
-        double absDiffF = std::abs(z_std[i] - z_fused[i]);
-        maxAbsDiffFused = std::max(maxAbsDiffFused, absDiffF);
-        if (std::abs(z_std[i]) > 1e-10) {
-            maxRelDiffFused = std::max(maxRelDiffFused, absDiffF / std::abs(z_std[i]));
+        double absDiff = std::abs(z1[i] - z2[i]);
+        maxAbsDiff = std::max(maxAbsDiff, absDiff);
+        
+        // Calculate relative difference (avoid division by zero)
+        if (std::abs(z1[i]) > 1e-10) {
+            double relDiff = absDiff / std::abs(z1[i]);
+            maxRelDiff = std::max(maxRelDiff, relDiff);
         }
-
-        // Compare Separate SIMD vs Standard
-         double absDiffS = std::abs(z_std[i] - z_separate[i]);
-        maxAbsDiffSeparate = std::max(maxAbsDiffSeparate, absDiffS);
-        if (std::abs(z_std[i]) > 1e-10) {
-            maxRelDiffSeparate = std::max(maxRelDiffSeparate, absDiffS / std::abs(z_std[i]));
-        }
+        
+        sumStd += z1[i];
+        sumSimd += z2[i];
     }
     
-    // --- Print performance results ---
+    // Print performance results
     std::cout << std::fixed << std::setprecision(6);
-    std::cout << "Performance for " << dataSize << " operations (exp(x) * sqrt(y)):\n";
-    std::cout << "  Standard Time:       " << standardTime << " ms\n";
+    std::cout << "Performance for " << dataSize << " operations:\n";
+    std::cout << "  Standard Time:      " << standardTime << " ms\n";
+    std::cout << "  SIMD Time:          " << simdTime << " ms\n";
+    std::cout << "  Speedup:            " << standardTime / simdTime << "x\n";
+    std::cout << "  Maximum Abs Diff:   " << std::scientific << maxAbsDiff << "\n";
+    std::cout << "  Maximum Rel Diff:   " << maxRelDiff << "\n";
+    std::cout << "  Standard Sum:       " << std::fixed << sumStd << "\n";
+    std::cout << "  SIMD Sum:           " << sumSimd << "\n";
     
-    std::cout << "  Fused SIMD Time:     " << fusedSimdTime << " ms ";
-    if (standardTime > 1e-9) 
-        std::cout << "(Speedup vs Std: " << std::setprecision(3) << standardTime / fusedSimdTime << "x)\n";
-    else std::cout << "(Speedup vs Std: N/A)\n";
-    
-    std::cout << "  Separate SIMD Time:  " << separateSimdTime << " ms ";
-     if (standardTime > 1e-9) 
-        std::cout << "(Speedup vs Std: " << std::setprecision(3) << standardTime / separateSimdTime << "x)\n";
-    else std::cout << "(Speedup vs Std: N/A)\n";
-
-    std::cout << "\nVerification vs Standard:\n";
-    std::cout << std::scientific << std::setprecision(6);
-    std::cout << "  Fused SIMD Max Abs Diff:   " << maxAbsDiffFused << "\n";
-    std::cout << "  Fused SIMD Max Rel Diff:   " << maxRelDiffFused << "\n";
-    std::cout << "  Separate SIMD Max Abs Diff:" << maxAbsDiffSeparate << "\n";
-    std::cout << "  Separate SIMD Max Rel Diff:" << maxRelDiffSeparate << "\n";
-    
-    std::cout << std::fixed << std::setprecision(6);
-    std::cout << "  Standard Sum:        " << sumStd << "\n";
-    std::cout << "  Fused SIMD Sum:      " << sumFused << "\n";
-    std::cout << "  Separate SIMD Sum:   " << sumSeparate << "\n";
-    
-    // Print some sample values for manual verification
+    // Print some sample values for verification
     std::cout << "\nSample values (first 5 elements):\n";
-    std::cout << "   x       y      Standard      Fused SIMD    Separate SIMD\n";
-    std::cout << "------  ------  ------------  ------------  -------------\n";
+    std::cout << "   x       y     Standard     SIMD       Diff\n";
+    std::cout << "------  ------  ----------  ----------  ------\n";
     
     for (size_t i = 0; i < 5; ++i) {
         std::cout << std::fixed << std::setprecision(4);
         std::cout << std::setw(6) << x[i] << "  " 
                   << std::setw(6) << y[i] << "  "
-                  << std::setw(12) << z_std[i] << "  "
-                  << std::setw(12) << z_fused[i] << "  "
-                  << std::setw(13) << z_separate[i] << "\n";
+                  << std::setw(10) << z1[i] << "  "
+                  << std::setw(10) << z2[i] << "  "
+                  << std::scientific << std::setprecision(2) 
+                  << std::abs(z1[i] - z2[i]) << "\n";
     }
 }
  
 /**
- * @brief Run a cache optimization test (Unchanged)
+ * @brief Run a cache optimization test
  */
 void runCacheOptimizationTest() {
     std::cout << "\n=== Cache Optimization Test ===\n";
@@ -394,11 +334,7 @@ void runCacheOptimizationTest() {
     std::cout << "Performance for 1000 repeated pricings:\n";
     std::cout << "  Time without Cache: " << timeNoCache << " ms\n";
     std::cout << "  Time with Cache:    " << timeWithCache << " ms\n";
-    if (timeWithCache > 1e-9) { // Avoid division by zero
-        std::cout << "  Speedup:            " << timeNoCache / timeWithCache << "x\n";
-    } else {
-         std::cout << "  Speedup:            N/A (Cache time too small)\n";
-    }
+    std::cout << "  Speedup:            " << timeNoCache / timeWithCache << "x\n";
     std::cout << "  Results Match:      " << (std::abs(resultNoCache - resultWithCache) < 1e-10 ? "Yes" : "No") << "\n";
     std::cout << "  Cache Size:         " << engineWithCache.getCacheSize() << " entries\n";
 }
@@ -414,7 +350,7 @@ int main() {
         runSimplePricingTest();
         runBatchPricingTest();
         runParallelPricingTest();
-        runSimdOptimizationTest(); // Run the updated SIMD test
+        runSimdOptimizationTest();
         runCacheOptimizationTest();
         
         std::cout << "\nAll tests completed successfully.\n";
