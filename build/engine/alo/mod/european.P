@@ -1,9 +1,7 @@
-build/engine/alo/mod/european.o: src/engine/alo/mod/european.cpp \
- src/engine/alo/mod/european.h src/engine/alo/mod/../opt/simd.h \
- /home/send2/.projects/Anderson/vec/include/sleef.h
+src/engine/alo/mod/european.cpp:
 src/engine/alo/mod/european.h:
 src/engine/alo/mod/../opt/simd.h:
 /home/send2/.projects/Anderson/vec/include/sleef.h:
-src/engine/alo/mod/european.cpp :
- src/engine/alo/mod/european.h src/engine/alo/mod/../opt/simd.h :
- /home/send2/.projects/Anderson/vec/include/sleef.h :
+:
+:
+:

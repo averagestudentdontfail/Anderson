@@ -1,2 +1,1 @@
-build/engine/alo/num/float.o: src/engine/alo/num/float.cpp
-src/engine/alo/num/float.cpp :
+src/engine/alo/num/float.cpp:
