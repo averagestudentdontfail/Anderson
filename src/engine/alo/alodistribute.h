@@ -8,13 +8,15 @@
 #include <condition_variable>
 #include <mpi.h>
 #include <memory>
+#include <thread>
+#include <mutex>
+#include "aloscheme.h"  // Include the common header
 
 namespace engine {
 namespace alo {
 
 // Forward declarations
 class ALOEngine;
-enum ALOScheme;
 
 namespace dist {
 

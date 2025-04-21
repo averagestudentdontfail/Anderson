@@ -1,5 +1,6 @@
 #include "alodistribute.h"
 #include "aloengine.h"
+#include "aloscheme.h"  
 #include <stdexcept>
 #include <algorithm>
 #include <chrono>

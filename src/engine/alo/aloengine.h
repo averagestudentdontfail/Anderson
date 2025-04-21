@@ -1,6 +1,8 @@
 #ifndef ENGINE_ALO_ALOENGINE_H
 #define ENGINE_ALO_ALOENGINE_H
 
+#include "aloscheme.h"
+#include "alodistribute.h"
 #include <memory>
 #include <functional>
 #include <string>
@@ -21,16 +23,6 @@ namespace num {
     class Integrator;
     class ChebyshevInterpolation;
 }
-
-/**
- * @enum ALOScheme
- * @brief Different numerical schemes for the ALO algorithm
- */
-enum ALOScheme {
-    FAST,           ///< Legendre-Legendre (7,2,7)-27 - Fastest but less accurate
-    ACCURATE,       ///< Legendre-TanhSinh (25,5,13)-1e-8 - Good balance of speed and accuracy
-    HIGH_PRECISION  ///< TanhSinh-TanhSinh (10,30)-1e-10 - Highest accuracy but slower
-};
 
 /**
  * @enum FixedPointEquation
@@ -475,9 +467,7 @@ namespace dist {
     std::shared_ptr<TaskDispatcher> createTaskDispatcher(ALOScheme scheme, size_t chunkSize = 1024);
 }
 
-}} // namespace engine::alo
-
-
-#include "alodistribute.h"
+} // namespace alo
+} // namespace engine
 
 #endif // ENGINE_ALO_ALOENGINE_H
