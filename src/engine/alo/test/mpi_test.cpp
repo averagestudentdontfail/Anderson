@@ -1,6 +1,6 @@
-#include "../mpi_wrapper.h"
-#include "../hybrid_parallel.h"
-#include "../parallel_diagnostics.h"
+#include "../mpiwrapper.h"
+#include "../hybridparallel.h"
+#include "../paralleldiagnose.h"
 #include "../aloengine.h"
 #include <iostream>
 #include <vector>

@@ -29,13 +29,11 @@ TaskDispatcher::TaskDispatcher(ALOScheme engineScheme, size_t chunkSize)
     // Create local engine
     localEngine_ = std::make_unique<ALOEngine>(engineScheme);
     
-    // Only start advanced features on worker nodes, not on master
-    // This prevents interference with master node coordination
-    if (worldSize_ > 1 && rank_ != 0) {
+    // Start threads for advanced functionality
+    if (worldSize_ > 1) {
         workerThread_ = std::thread(&TaskDispatcher::workerThreadFunc, this);
-        // Temporarily disable work stealing and profiling to isolate the issue
-        // stealingThread_ = std::thread(&TaskDispatcher::stealingThreadFunc, this);
-        // profilingThread_ = std::thread(&TaskDispatcher::profilingThreadFunc, this);
+        stealingThread_ = std::thread(&TaskDispatcher::stealingThreadFunc, this);
+        profilingThread_ = std::thread(&TaskDispatcher::profilingThreadFunc, this);
     }
     
     // Initialize metrics
@@ -68,70 +66,15 @@ std::vector<double> TaskDispatcher::distributedBatchCalculatePut(
     }
     
     if (rank_ == 0) {
-        // Master node: use simplified processing for now
-        results = masterNodeProcessingSimplified(S, strikes, r, q, vol, T);
+        // Master node: use advanced processing
+        results = masterNodeProcessingAdvanced(S, strikes, r, q, vol, T);
     } else {
-        // Worker node: enter simplified worker mode
-        workerNodeSimplified();
+        // Worker node: enter optimized worker mode
+        workerNodeOptimized();
         
         // Receive final results
         mpi::MPIWrapper::bcast(results.data(), n, MPI_DOUBLE, 0);
     }
-    
-    return results;
-}
-
-std::vector<double> TaskDispatcher::masterNodeProcessingSimplified(
-    double S, const std::vector<double>& strikes,
-    double r, double q, double vol, double T) {
-    
-    const size_t n = strikes.size();
-    std::vector<double> results(n);
-    
-    // Simple static work distribution
-    size_t chunkSize = n / worldSize_;
-    size_t remainder = n % worldSize_;
-    
-    // Send work to workers
-    for (int node = 1; node < worldSize_; ++node) {
-        size_t startIdx = node * chunkSize + std::min(static_cast<size_t>(node), remainder);
-        size_t endIdx = startIdx + chunkSize + (static_cast<size_t>(node) < remainder ? 1 : 0);
-        
-        // Send parameters
-        double params[5] = {S, r, q, vol, T};
-        mpi::MPIWrapper::send(params, 5, MPI_DOUBLE, node, TAG_PARAMETERS);
-        
-        // Send chunk info
-        size_t chunkInfo[2] = {startIdx, endIdx - startIdx};
-        mpi::MPIWrapper::send(chunkInfo, 2, MPI_UNSIGNED_LONG, node, TAG_CHUNK_SIZE);
-        
-        // Send strikes
-        mpi::MPIWrapper::send(strikes.data() + startIdx, chunkInfo[1], MPI_DOUBLE, node, TAG_CHUNK_DATA);
-    }
-    
-    // Process master node's portion
-    size_t masterStart = 0;
-    size_t masterEnd = chunkSize + (remainder > 0 ? 1 : 0);
-    std::vector<double> masterStrikes(strikes.begin() + masterStart, strikes.begin() + masterEnd);
-    std::vector<double> masterResults = localEngine_->batchCalculatePut(S, masterStrikes, r, q, vol, T);
-    std::copy(masterResults.begin(), masterResults.end(), results.begin());
-    
-    // Receive results from workers
-    for (int node = 1; node < worldSize_; ++node) {
-        size_t startIdx = node * chunkSize + std::min(static_cast<size_t>(node), remainder);
-        size_t size = chunkSize + (static_cast<size_t>(node) < remainder ? 1 : 0);
-        
-        mpi::MPIWrapper::recv(results.data() + startIdx, size, MPI_DOUBLE, node, TAG_RESULTS);
-    }
-    
-    // Signal termination to all workers
-    for (int node = 1; node < worldSize_; ++node) {
-        int terminate = 1;
-        mpi::MPIWrapper::send(&terminate, 1, MPI_INT, node, TAG_TERMINATE);
-    }
-    
-    // Broadcast final results to all nodes
-    mpi::MPIWrapper::bcast(results.data(), n, MPI_DOUBLE, 0);
     
     return results;
 }
@@ -382,47 +325,6 @@ bool TaskDispatcher::attemptWorkStealing() {
     
     metrics_.workStealAttempts++;
     return false;
-}
-
-void TaskDispatcher::workerNodeSimplified() {
-    while (true) {
-        // Receive parameters
-        double params[5];
-        mpi::MPIWrapper::recv(params, 5, MPI_DOUBLE, 0, TAG_PARAMETERS);
-        
-        double S = params[0];
-        double r = params[1];
-        double q = params[2];
-        double vol = params[3];
-        double T = params[4];
-        
-        // Receive chunk info
-        size_t chunkInfo[2];
-        mpi::MPIWrapper::recv(chunkInfo, 2, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_SIZE);
-        
-        size_t startIdx = chunkInfo[0];
-        size_t chunkSize = chunkInfo[1];
-        
-        // Receive strikes
-        std::vector<double> strikes(chunkSize);
-        mpi::MPIWrapper::recv(strikes.data(), chunkSize, MPI_DOUBLE, 0, TAG_CHUNK_DATA);
-        
-        // Process chunk
-        std::vector<double> results = localEngine_->batchCalculatePut(S, strikes, r, q, vol, T);
-        
-        // Send results back
-        mpi::MPIWrapper::send(results.data(), results.size(), MPI_DOUBLE, 0, TAG_RESULTS);
-        
-        // Check for termination
-        int terminate = 0;
-        MPI_Status status;
-        MPI_Iprobe(0, TAG_TERMINATE, MPI_COMM_WORLD, &terminate, &status);
-        
-        if (terminate) {
-            mpi::MPIWrapper::recv(&terminate, 1, MPI_INT, 0, TAG_TERMINATE);
-            break;
-        }
-    }
 }
 
 void TaskDispatcher::workerNodeOptimized() {
