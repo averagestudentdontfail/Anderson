@@ -108,11 +108,6 @@ clean:
 	@echo "Cleaning build artifacts..."
 	rm -rf $(BUILD_DIR) $(BIN_DIR) $(LIB_DIR)
 
-# Tracy-specific targets
-tracy_clean:
-	@echo "Cleaning Tracy artifacts..."
-	rm -rf $(PRO_DIR)
-
 # --- Utility Targets ---
 full: all test test_sleef
 
@@ -120,5 +115,5 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.P,$(ENGINE_SRC))
 endif
 
-.PHONY: all directories tests test test_sleef mpi_test clean tracy_clean full
+.PHONY: all directories tests test test_sleef mpi_test clean full
 .SECONDARY: $(ENGINE_OBJ) $(TEST_OBJ)
