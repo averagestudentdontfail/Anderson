@@ -471,10 +471,13 @@ private:
 namespace dist {
     class TaskDispatcher;
     
-    // Factory function to create task dispatchers
+    // Factory function to create task dispatchers - match signature exactly with alodistribute.h
     std::shared_ptr<TaskDispatcher> createTaskDispatcher(ALOScheme scheme, size_t chunkSize = 1024);
 }
 
 }} // namespace engine::alo
+
+
+#include "alodistribute.h"
 
 #endif // ENGINE_ALO_ALOENGINE_H

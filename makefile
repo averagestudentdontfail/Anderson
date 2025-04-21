@@ -27,9 +27,14 @@ SLEEF_LIB = -L$(CURDIR)/vec/lib -lsleef
 # Include directories
 INCLUDES = -I$(SRC_DIR) $(SLEEF_INCLUDE)
 
-# Source files - List alodistribute.cpp first to ensure proper dependency resolution
-ENGINE_SRC = $(SRC_DIR)/engine/alo/alodistribute.cpp \
-             $(filter-out $(SRC_DIR)/engine/alo/alodistribute.cpp, $(wildcard $(SRC_DIR)/engine/alo/*.cpp)) \
+# Dependencies - we need to track header dependencies to ensure proper ordering
+ALODISTRIBUTE_CPP = $(SRC_DIR)/engine/alo/alodistribute.cpp
+ALODISTRIBUTE_H = $(SRC_DIR)/engine/alo/alodistribute.h
+ALOENGINE_H = $(SRC_DIR)/engine/alo/aloengine.h
+
+# Source files - define explicit dependency order
+ENGINE_SRC = $(ALODISTRIBUTE_CPP) \
+             $(filter-out $(ALODISTRIBUTE_CPP), $(wildcard $(SRC_DIR)/engine/alo/*.cpp)) \
              $(wildcard $(SRC_DIR)/engine/alo/mod/*.cpp) \
              $(wildcard $(SRC_DIR)/engine/alo/num/*.cpp) \
              $(wildcard $(SRC_DIR)/engine/alo/opt/*.cpp)
@@ -66,15 +71,22 @@ $(ALO_LIB): $(ENGINE_OBJ)
 	@mkdir -p $(LIB_DIR)
 	ar rcs $@ $^
 
-# Special rule for alodistribute.cpp to ensure it's compiled first
-$(BUILD_DIR)/engine/alo/alodistribute.o: $(SRC_DIR)/engine/alo/alodistribute.cpp
+# Special rule for alodistribute.cpp with explicit dependency on headers
+$(BUILD_DIR)/engine/alo/alodistribute.o: $(ALODISTRIBUTE_CPP) $(ALODISTRIBUTE_H) $(ALOENGINE_H)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Compile engine source files
+# Compile engine source files with automatic dependency tracking
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
+	@cp $(BUILD_DIR)/$*.d $(BUILD_DIR)/$*.P
+	@sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' \
+		-e '/^$$/ d' -e 's/$$/ :/' < $(BUILD_DIR)/$*.d >> $(BUILD_DIR)/$*.P
+	@rm -f $(BUILD_DIR)/$*.d
+
+# Include automatic dependencies
+-include $(patsubst %.o,%.P,$(ENGINE_OBJ))
 
 # Build the tests
 tests: $(TEST_EXEC) $(SLEEF_TEST)

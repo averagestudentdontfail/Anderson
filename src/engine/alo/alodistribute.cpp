@@ -342,12 +342,11 @@ void TaskDispatcher::signalReadiness(double S, double r, double q, double vol, d
 }
 
 void TaskDispatcher::implementWorkStealing(
-    double S, const std::vector<double>& strikes,
-    double r, double q, double vol, double T,
-    std::vector<double>& results) {
+    double /* S */, const std::vector<double>& /* strikes */,
+    double /* r */, double /* q */, double /* vol */, double /* T */,
+    std::vector<double>& /* results */) {
     // Simplified implementation - OpenMP can handle work distribution internally
     // This is a stub implementation for now
-    // In a production system, we would implement more sophisticated work stealing
 
     // Track which workers are ready for more work
     std::vector<bool> workerReady(worldSize_, false);
@@ -370,6 +369,11 @@ void TaskDispatcher::implementWorkStealing(
     
     // Currently, we don't redistribute additional work
     // This could be extended in the future
+}
+
+// Implementation of createTaskDispatcher
+std::shared_ptr<TaskDispatcher> createTaskDispatcher(ALOScheme scheme, size_t chunkSize) {
+    return std::make_shared<TaskDispatcher>(scheme, chunkSize);
 }
 
 } // namespace dist

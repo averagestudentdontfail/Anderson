@@ -12,15 +12,9 @@
 namespace engine {
 namespace alo {
 
-// Forward declaration of ALOEngine
+// Forward declarations
 class ALOEngine;
-
-// Define ALOScheme here to avoid circular dependency
-enum ALOScheme {
-    FAST,           ///< Legendre-Legendre (7,2,7)-27 - Fastest but less accurate
-    ACCURATE,       ///< Legendre-TanhSinh (25,5,13)-1e-8 - Good balance of speed and accuracy
-    HIGH_PRECISION  ///< TanhSinh-TanhSinh (10,30)-1e-10 - Highest accuracy but slower
-};
+enum ALOScheme;
 
 namespace dist {
 
@@ -161,10 +155,7 @@ private:
  * @param chunkSize Size of work chunks
  * @return Shared pointer to task dispatcher
  */
-inline std::shared_ptr<TaskDispatcher> createTaskDispatcher(
-    ALOScheme scheme, size_t chunkSize = 1024) {
-    return std::make_shared<TaskDispatcher>(scheme, chunkSize);
-}
+std::shared_ptr<TaskDispatcher> createTaskDispatcher(ALOScheme scheme, size_t chunkSize = 1024);
 
 } // namespace dist
 } // namespace alo
