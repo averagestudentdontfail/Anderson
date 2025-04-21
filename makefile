@@ -2,7 +2,7 @@
 
 # Compiler settings
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -march=native -mavx2 -ffast-math
+CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -march=native -mavx2 -ffast-math -g
 
 # Directories
 SRC_DIR = src
