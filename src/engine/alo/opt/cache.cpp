@@ -1,162 +1,82 @@
- #include "cache.h"
- #include "../aloengine.h"
- #include <chrono>
- #include <algorithm>
- #include <unordered_map>
- #include <mutex>
- #include <shared_mutex>
- #include <thread>
- #include <random>
- 
- namespace engine {
- namespace alo {
- namespace opt {
- 
- /**
-  * @brief Initialize the thread-local cache with optimal settings
-  */
+#include "cache.h"
+#include "../aloengine.h" // Include necessary engine header
+#include <chrono>
+#include <algorithm>
+#include <vector>
+#include <thread>       // For std::this_thread
+#include <random>       // For potential future randomized eviction/init
+
+namespace engine {
+namespace alo {
+namespace opt {
+
+/**
+ * @brief Initialize the thread-local cache with optimal settings
+ * * This function ensures that each thread calling it gets a properly
+ * initialized thread-local cache instance. Can be expanded later
+ * to set different sizes/TTLs based on thread roles if needed.
+ */
  void initializeThreadLocalCache() {
-     // Set thread-local cache parameters based on thread ID
-     thread_local bool initialized = false;
+     // Access the thread-local cache to ensure it's constructed.
+     // The default constructor values (50k size, 30s TTL) are used unless
+     // specific per-thread settings are required later.
+     auto& cache = getThreadLocalCache(); 
      
-     if (!initialized) {
-         auto& cache = getThreadLocalCache();
-         
-         // Get a pseudo-unique thread ID
-         auto threadId = std::hash<std::thread::id>{}(std::this_thread::get_id());
-         
-         // Use a different max size for each thread to prevent synchronized eviction
-         size_t baseSize = 50000;
-         size_t variance = threadId % 10000;
-         cache.setMaxSize(baseSize + variance);
-         
-         // Set TTL to 30 seconds 
-         cache.setTTL(30000);
-         
-         initialized = true;
-     }
+     // Example: Set a slightly different size based on thread ID hash
+     // This might help decorrelate eviction patterns across threads.
+     // std::hash<std::thread::id> hasher;
+     // size_t thread_hash = hasher(std::this_thread::get_id());
+     // cache.setMaxSize(50000 + (thread_hash % 10000)); 
+     // cache.setTTL(30000); // 30 seconds TTL
+
+     // Currently, just ensuring it's accessed is enough if defaults are okay.
+     (void)cache; // Suppress unused variable warning if not modifying defaults
  }
  
- /**
-  * @brief Initialize the global tiered cache with optimal settings
-  */
- void initializeTieredCache() {
-     // This is a no-op since the tiered cache singleton 
-     // is already initialized with good defaults
- }
- 
- /**
-  * @brief Get a batch of pricing results with caching
-  * 
-  * @param S Spot price
-  * @param strikes Vector of strike prices
-  * @param r Risk-free rate
-  * @param q Dividend yield
-  * @param vol Volatility
-  * @param T Time to maturity
-  * @param computeFunc Function to compute missing prices
-  * @return Vector of prices
-  */
- std::vector<double> getBatchCachedPrices(
-     double S, 
-     const std::vector<double>& strikes,
-     double r, double q, double vol, double T,
-     int optionType,
-     const std::function<std::vector<double>(const std::vector<size_t>&, const std::vector<double>&)>& computeFunc) {
-     
-     // Ensure thread-local cache is initialized
-     initializeThreadLocalCache();
-     
-     // Create option parameter keys for all strikes
-     std::vector<OptionParams> keys;
-     keys.reserve(strikes.size());
-     
-     for (const auto& K : strikes) {
-         keys.push_back({S, K, r, q, vol, T, optionType});
-     }
-     
-     // Check cache for existing results
-     auto& tieredCache = getTieredPricingCache();
-     auto cacheHits = tieredCache.batchLookup(keys);
-     
-     // If all results were in cache, return them
-     if (cacheHits.size() == strikes.size()) {
-         std::vector<double> results(strikes.size());
-         for (const auto& hit : cacheHits) {
-             results[hit.index] = hit.value;
-         }
-         return results;
-     }
-     
-     // Collect indices and strikes for cache misses
-     std::vector<size_t> missIndices;
-     std::vector<double> missStrikes;
-     
-     // Create lookup table for cache hits
-     std::vector<bool> found(strikes.size(), false);
-     for (const auto& hit : cacheHits) {
-         found[hit.index] = true;
-     }
-     
-     // Collect indices and strikes for cache misses
-     for (size_t i = 0; i < strikes.size(); ++i) {
-         if (!found[i]) {
-             missIndices.push_back(i);
-             missStrikes.push_back(strikes[i]);
-         }
-     }
-     
-     // Compute missing prices
-     std::vector<double> missPrices = computeFunc(missIndices, missStrikes);
-     
-     // Combine cache hits and computed prices
-     std::vector<double> results(strikes.size());
-     
-     // First, fill in cache hits
-     for (const auto& hit : cacheHits) {
-         results[hit.index] = hit.value;
-     }
-     
-     // Then, fill in computed prices and update cache
-     for (size_t i = 0; i < missIndices.size(); ++i) {
-         size_t originalIndex = missIndices[i];
-         double price = missPrices[i];
-         
-         results[originalIndex] = price;
-         
-         // Update cache
-         tieredCache.put(keys[originalIndex], price);
-     }
-     
-     return results;
- }
- 
- /**
-  * @brief Helper function to warm up caches with common parameter sets
-  * 
-  * @param engine ALO engine to use for pricing
-  */
+
+/**
+ * @brief Helper function to warm up caches with common parameter sets
+ * * Populates the calling thread's local cache with results for frequently
+ * expected parameter combinations.
+ * * @param engine ALO engine instance (const reference) to use for pricing
+ */
  void warmupCache(const ALOEngine& engine) {
-     // Common parameter sets for interest rates, volatilities, etc.
+     // Ensure the cache for this thread is initialized
+     initializeThreadLocalCache(); 
+
+     // Define common parameter ranges
      std::vector<double> rates = {0.01, 0.02, 0.03, 0.04, 0.05};
-     std::vector<double> vols = {0.1, 0.15, 0.2, 0.25, 0.3};
-     std::vector<double> times = {0.25, 0.5, 1.0, 2.0};
-     
-     // Compute and cache a limited set of options with common parameters
+     std::vector<double> vols = {0.10, 0.15, 0.20, 0.25, 0.30, 0.35};
+     std::vector<double> times = {0.25, 0.5, 1.0, 1.5, 2.0};
+     std::vector<double> strikes_rel = {-15.0, -10.0, -5.0, 0.0, 5.0, 10.0, 15.0}; // Relative to spot
+
      double S = 100.0;
-     std::vector<double> strikes = {90.0, 95.0, 100.0, 105.0, 110.0};
-     double q = 0.01;
+     double q = 0.02; // Example fixed dividend yield
+
+     std::cout << "Warming up cache for thread " << std::this_thread::get_id() << "..." << std::endl;
+     int count = 0;
      
-     // Cache the most common parameter sets
+     // Calculate and cache results for common scenarios
+     // Focus on puts as they are more computationally intensive for ALO
      for (double r : rates) {
          for (double vol : vols) {
              for (double T : times) {
-                 engine.batchCalculatePut(S, strikes, r, q, vol, T);
+                 for (double k_rel : strikes_rel) {
+                     double K = S + k_rel;
+                     if (K > 0) { // Ensure strike is positive
+                        // Calculate the price (this will use getCachedPrice, populating the cache)
+                        engine.calculateOption(S, K, r, q, vol, T, PUT); 
+                        count++;
+                     }
+                 }
              }
          }
      }
+     std::cout << "Cache warmup complete for thread " << std::this_thread::get_id() << ". Added approx " << count << " entries." << std::endl;
+
+     // Optionally, add calls for common CALL options if needed
  }
- 
- } // namespace opt
- } // namespace alo
- } // namespace engine
+
+} // namespace opt
+} // namespace alo
+} // namespace engine
