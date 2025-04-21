@@ -1,7 +1,7 @@
 #include "alodistribute.h"
 #include "aloengine.h"
 #include "aloscheme.h"
-#include "mpi_wrapper.h"
+#include "mpiwrapper.h"
 #include <stdexcept>
 #include <algorithm>
 #include <chrono>

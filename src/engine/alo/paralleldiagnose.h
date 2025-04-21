@@ -33,7 +33,11 @@ private:
             std::cout << "  World Size: " << size << "\n";
             std::cout << "  Thread Support: " << getThreadSupport() << "\n";
             std::cout << "\n";
+            std::cout.flush();
         }
+        
+        // Ensure all processes complete this diagnosis phase
+        mpi::MPIWrapper::barrier();
     }
     
     static void diagnoseOpenMP() {
@@ -44,27 +48,36 @@ private:
             std::cout << "  Max Threads: " << omp_get_max_threads() << "\n";
             std::cout << "  Nested Enabled: " << omp_get_nested() << "\n";
             std::cout << "\n";
+            std::cout.flush();
         }
         #else
         if (mpi::MPIWrapper::rank() == 0) {
             std::cout << "=== OpenMP Diagnostics ===\n";
             std::cout << "  OpenMP NOT ENABLED (compile with -fopenmp)\n";
             std::cout << "\n";
+            std::cout.flush();
         }
         #endif
+        
+        // Ensure all processes complete this diagnosis phase
+        mpi::MPIWrapper::barrier();
     }
     
     static void diagnoseHybrid() {
-        // Test hybrid execution
-        std::vector<int> testData(1000);
-        for (int i = 0; i < 1000; ++i) {
-            testData[i] = i;
+        // Test hybrid execution with doubles (the specialized implementation)
+        const size_t TEST_SIZE = 100;  // Smaller size for diagnostics
+        std::vector<double> testData(TEST_SIZE);
+        
+        // Initialize data
+        for (size_t i = 0; i < TEST_SIZE; i++) {
+            testData[i] = static_cast<double>(i);
         }
         
+        // Simple square function
         auto result = hybrid::HybridExecutor::processDistributed(
             testData, 
-            [](int x) { return x * x; },
-            10
+            [](double x) { return x * x; },
+            10  // Small chunk size for testing
         );
         
         if (mpi::MPIWrapper::rank() == 0) {
@@ -72,11 +85,15 @@ private:
             std::cout << "  Data Size: " << testData.size() << "\n";
             std::cout << "  Result Size: " << result.size() << "\n";
             std::cout << "  First 5 Results: ";
-            for (int i = 0; i < std::min(5, (int)result.size()); ++i) {
+            for (int i = 0; i < std::min(5, static_cast<int>(result.size())); ++i) {
                 std::cout << result[i] << " ";
             }
             std::cout << "\n\n";
+            std::cout.flush();
         }
+        
+        // Ensure all processes complete this diagnosis phase
+        mpi::MPIWrapper::barrier();
     }
     
     static std::string getMPIVersion() {
