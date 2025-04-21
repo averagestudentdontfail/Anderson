@@ -10,7 +10,8 @@
 #include <memory>
 #include <thread>
 #include <mutex>
-#include "aloscheme.h"  // Include the common header
+#include <chrono>
+#include "aloscheme.h"
 
 namespace engine {
 namespace alo {
@@ -32,11 +33,26 @@ enum MessageTags {
     TAG_READY = 5,          // Worker ready signal
     TAG_WORK_REQUEST = 6,   // Work stealing request
     TAG_WORK_RESPONSE = 7,  // Work stealing response
-    TAG_TERMINATE = 8       // Termination signal
+    TAG_TERMINATE = 8,      // Termination signal
+    TAG_LOAD_BALANCE = 9,   // Load balancing request
+    TAG_PROFILING = 10      // Performance profiling data
 };
 
 /**
- * @brief Distributed work item for option pricing
+ * @brief Performance metrics for distributed processing
+ */
+struct PerformanceMetrics {
+    std::atomic<uint64_t> tasksProcessed{0};
+    std::atomic<uint64_t> bytesSent{0};
+    std::atomic<uint64_t> bytesReceived{0};
+    std::atomic<uint64_t> totalLatencyNs{0};
+    std::atomic<uint64_t> workStealAttempts{0};
+    std::atomic<uint64_t> workStealSuccesses{0};
+    std::chrono::steady_clock::time_point startTime;
+};
+
+/**
+ * @brief Work item with extended metadata
  */
 struct WorkItem {
     double S;                       // Spot price
@@ -46,115 +62,129 @@ struct WorkItem {
     double vol;                     // Volatility
     double T;                       // Time to maturity
     size_t startIdx;                // Starting index in global result array
+    uint32_t priority;              // Priority level for processing
+    std::chrono::steady_clock::time_point timestamp; // Creation timestamp
+    
+    // Comparison operator for priority queue
+    bool operator<(const WorkItem& other) const {
+        return priority < other.priority;  // Higher priority first
+    }
 };
 
 /**
  * @class TaskDispatcher
- * @brief Distributes option pricing tasks across multiple compute nodes
- * 
- * This class implements a distributed work-stealing framework for parallel
- * option pricing across compute nodes. It uses MPI for communication and
- * manages work distribution, load balancing, and result aggregation.
+ * @brief High-performance distributed option pricing framework
  */
 class TaskDispatcher {
 public:
     /**
-     * @brief Constructor
-     * 
-     * @param engineScheme ALO scheme to use for local computations
-     * @param chunkSize Size of work chunks for distribution
+     * @brief Constructor with advanced configuration
      */
     TaskDispatcher(ALOScheme engineScheme, size_t chunkSize = 1024);
     
     /**
-     * @brief Destructor
+     * @brief Destructor with clean shutdown
      */
     ~TaskDispatcher();
     
     /**
-     * @brief Distribute a batch of put option pricing tasks across nodes
-     * 
-     * @param S Spot price
-     * @param strikes Vector of strike prices
-     * @param r Risk-free rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity
-     * @return Vector of put option prices
+     * @brief Advanced batch pricing with load balancing
      */
     std::vector<double> distributedBatchCalculatePut(
         double S, const std::vector<double>& strikes,
         double r, double q, double vol, double T);
     
+    /**
+     * @brief Get performance metrics
+     */
+    PerformanceMetrics getMetrics() const;
+    
+    /**
+     * @brief Configure adaptive chunking
+     */
+    void setAdaptiveChunking(bool enable);
+    
+    /**
+     * @brief Set work stealing threshold
+     */
+    void setWorkStealingThreshold(double threshold);
+    
 private:
-    // Member variables
+    // Core components
     std::unique_ptr<ALOEngine> localEngine_;
     size_t chunkSize_;
     int rank_;
     int worldSize_;
     std::atomic<bool> terminated_;
-    std::thread workerThread_;
-    std::mutex workQueueMutex_;
-    std::condition_variable workQueueCV_;
-    std::queue<WorkItem> workQueue_;
     
-    /**
-     * @brief Process work on the master node
-     */
-    std::vector<double> masterNodeProcessing(
+    // Thread management
+    std::thread workerThread_;
+    std::thread stealingThread_;
+    std::thread profilingThread_;
+    std::mutex queueMutex_;
+    std::condition_variable queueCV_;
+    
+    // Work management
+    std::priority_queue<WorkItem> workQueue_;
+    std::atomic<size_t> pendingTasks_;
+    
+    // Performance tracking
+    PerformanceMetrics metrics_;
+    std::atomic<bool> adaptiveChunking_;
+    std::atomic<double> workStealingThreshold_;
+    
+    // Advanced processing methods
+    std::vector<double> masterNodeProcessingAdvanced(
         double S, const std::vector<double>& strikes,
         double r, double q, double vol, double T);
     
-    /**
-     * @brief Send work to a worker node
-     */
+    void sendWorkToNodeNonBlocking(int node, const WorkItem& work);
+    void processLocalWorkOptimized(WorkItem& work, std::vector<double>& results);
+    void receiveResultsNonBlocking(int node, std::vector<double>& results);
+    
+    // Legacy methods for backward compatibility
     void sendWorkToNode(int node, const std::vector<size_t>& workload, 
                        double S, const std::vector<double>& strikes,
                        double r, double q, double vol, double T, size_t n);
-    
-    /**
-     * @brief Process work locally on this node
-     */
+    void receiveResultsFromNode(int node, const std::vector<size_t>& workload, 
+                              std::vector<double>& results, size_t n);
     void processLocalWork(int nodeIdx, const std::vector<size_t>& workload, 
                          double S, const std::vector<double>& strikes,
                          double r, double q, double vol, double T, 
                          size_t n, std::vector<double>& results);
     
-    /**
-     * @brief Receive results from a worker node
-     */
-    void receiveResultsFromNode(int node, const std::vector<size_t>& workload, 
-                              std::vector<double>& results, size_t n);
-    
-    /**
-     * @brief Worker node processing function
-     */
-    void workerNodeProcessing();
-    
-    /**
-     * @brief Worker thread function for handling asynchronous work
-     */
+    // Thread functions
     void workerThreadFunc();
+    void stealingThreadFunc();
+    void profilingThreadFunc();
     
-    /**
-     * @brief Signal readiness for work stealing
-     */
-    void signalReadiness(double S, double r, double q, double vol, double T);
+    // Worker node behavior
+    void workerNodeProcessing();
+    void workerNodeOptimized();
     
-    /**
-     * @brief Implement work stealing for load balancing
-     */
+    // Load balancing
+    void performLoadBalancing();
+    bool attemptWorkStealing();
+    void handleWorkRequest(int requestingNode);
+    
+    // Performance optimization
+    size_t calculateOptimalChunkSize(size_t totalWork);
+    void updateProcessingStatistics(const WorkItem& work, double processingTime);
+    void adjustAdaptiveParameters();
+    
+    // Work handling
     void implementWorkStealing(
         double S, const std::vector<double>& strikes,
         double r, double q, double vol, double T,
         std::vector<double>& results);
+    void signalReadiness(double S, double r, double q, double vol, double T);
 };
 
 /**
- * @brief Create a distributed task dispatcher
+ * @brief Create a high-performance task dispatcher
  * 
  * @param scheme Numerical scheme to use
- * @param chunkSize Size of work chunks
+ * @param chunkSize Initial chunk size
  * @return Shared pointer to task dispatcher
  */
 std::shared_ptr<TaskDispatcher> createTaskDispatcher(ALOScheme scheme, size_t chunkSize = 1024);

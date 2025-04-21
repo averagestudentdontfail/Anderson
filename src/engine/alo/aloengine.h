@@ -464,7 +464,7 @@ namespace dist {
     class TaskDispatcher;
     
     // Factory function to create task dispatchers - match signature exactly with alodistribute.h
-    std::shared_ptr<TaskDispatcher> createTaskDispatcher(ALOScheme scheme, size_t chunkSize = 1024);
+    std::shared_ptr<TaskDispatcher> createTaskDispatcher(ALOScheme scheme, size_t chunkSize);
 }
 
 } // namespace alo
