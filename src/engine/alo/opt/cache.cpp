@@ -1,4 +1,5 @@
  #include "cache.h"
+ #include "../aloengine.h"
  #include <chrono>
  #include <algorithm>
  #include <unordered_map>
