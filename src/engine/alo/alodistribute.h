@@ -52,6 +52,32 @@ struct PerformanceMetrics {
 };
 
 /**
+ * @brief Non-atomic version of performance metrics for reporting
+ */
+struct PerformanceMetricsSnapshot {
+    uint64_t tasksProcessed;
+    uint64_t bytesSent;
+    uint64_t bytesReceived;
+    uint64_t totalLatencyNs;
+    uint64_t workStealAttempts;
+    uint64_t workStealSuccesses;
+    std::chrono::steady_clock::time_point startTime;
+    
+    PerformanceMetricsSnapshot() = default;
+    
+    // Constructor to create snapshot from atomic metrics
+    explicit PerformanceMetricsSnapshot(const PerformanceMetrics& metrics)
+        : tasksProcessed(metrics.tasksProcessed.load())
+        , bytesSent(metrics.bytesSent.load())
+        , bytesReceived(metrics.bytesReceived.load())
+        , totalLatencyNs(metrics.totalLatencyNs.load())
+        , workStealAttempts(metrics.workStealAttempts.load())
+        , workStealSuccesses(metrics.workStealSuccesses.load())
+        , startTime(metrics.startTime)
+    {}
+};
+
+/**
  * @brief Work item with extended metadata
  */
 struct WorkItem {
@@ -95,9 +121,9 @@ public:
         double r, double q, double vol, double T);
     
     /**
-     * @brief Get performance metrics
+     * @brief Get performance metrics snapshot
      */
-    PerformanceMetrics getMetrics() const;
+    PerformanceMetricsSnapshot getMetrics() const;
     
     /**
      * @brief Configure adaptive chunking

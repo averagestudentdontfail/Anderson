@@ -443,14 +443,18 @@ void TaskDispatcher::adjustAdaptiveParameters() {
         double successRate = static_cast<double>(metrics_.workStealSuccesses) / 
                            metrics_.workStealAttempts;
         
+        // Use atomic operations correctly
+        double currentThreshold = workStealingThreshold_.load();
+        
         if (successRate < 0.2) {
-            workStealingThreshold_ *= 0.9;  // Lower threshold to steal more aggressively
+            currentThreshold *= 0.9;  // Lower threshold to steal more aggressively
         } else if (successRate > 0.8) {
-            workStealingThreshold_ *= 1.1;  // Raise threshold to steal less often
+            currentThreshold *= 1.1;  // Raise threshold to steal less often
         }
         
         // Keep threshold in bounds
-        workStealingThreshold_ = std::max(0.1, std::min(0.9, workStealingThreshold_.load()));
+        currentThreshold = std::max(0.1, std::min(0.9, currentThreshold));
+        workStealingThreshold_.store(currentThreshold);
     }
 }
 
@@ -470,12 +474,12 @@ void TaskDispatcher::performLoadBalancing() {
     int minLoad = *std::min_element(nodeLoads.begin() + 1, nodeLoads.end());
     int maxLoad = *std::max_element(nodeLoads.begin() + 1, nodeLoads.end());
     
-    if (maxLoad - minLoad > chunkSize_ * 2) {
+    if (static_cast<size_t>(maxLoad - minLoad) > chunkSize_ * 2) {
         // Trigger redistribution (simplified for now)
     }
 }
 
-void TaskDispatcher::updateProcessingStatistics(const WorkItem& work, double processingTime) {
+void TaskDispatcher::updateProcessingStatistics(const WorkItem& /* work */, double processingTime) {
     metrics_.tasksProcessed++;
     metrics_.totalLatencyNs += static_cast<uint64_t>(processingTime * 1e6);
     
@@ -493,8 +497,9 @@ void TaskDispatcher::setWorkStealingThreshold(double threshold) {
     workStealingThreshold_ = threshold;
 }
 
-PerformanceMetrics TaskDispatcher::getMetrics() const {
-    return metrics_;
+
+PerformanceMetricsSnapshot TaskDispatcher::getMetrics() const {
+    return PerformanceMetricsSnapshot(metrics_);
 }
 
 // Legacy methods for backward compatibility
