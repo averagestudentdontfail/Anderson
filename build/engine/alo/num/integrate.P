@@ -1,0 +1,5 @@
+build/engine/alo/num/integrate.o: src/engine/alo/num/integrate.cpp \
+ src/engine/alo/num/integrator.h
+src/engine/alo/num/integrator.h:
+src/engine/alo/num/integrate.cpp :
+ src/engine/alo/num/integrator.h :

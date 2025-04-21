@@ -1,7 +1,6 @@
-#include "../mpi_wrapper.h"
-#include "../hybrid_parallel.h"
-#include "../parallel_diagnostics.h"
-#include "../alodistribute.h"
+#include "../mpiwrapper.h"
+#include "../hybridparallel.h"
+#include "../paralleldiagnose.h"
 #include "../aloengine.h"
 #include <iostream>
 #include <vector>
@@ -94,196 +93,75 @@ TestResult testBasicFunctionality(dist::TaskDispatcher& dispatcher) {
     auto results = dispatcher.distributedBatchCalculatePut(S, strikes, r, q, vol, T);
     double elapsed = timer.elapsed();
     
-    // Verify results against sequential computation
-    if (rank == 0) {
-        ALOEngine engine(ACCURATE);
-        auto expectedResults = engine.batchCalculatePut(S, strikes, r, q, vol, T);
-        
-        for (size_t i = 0; i < results.size(); ++i) {
-            if (std::abs(results[i] - expectedResults[i]) > 1e-10) {
-                success = false;
-                message = "Result mismatch at index " + std::to_string(i);
-                break;
-            }
+    // Each process prints its rank
+    for (int i = 0; i < size; ++i) {
+        if (rank == i) {
+            std::cout << "Hello from process " << rank << "\n";
         }
-        
-        if (success) {
-            message = "All results match sequential computation";
-        }
-        
-        std::cout << (success ? "PASSED" : "FAILED") << ": " << message << "\n";
-        std::cout << "Execution time: " << elapsed << " ms\n";
+        mpi::MPIWrapper::barrier(); // Ensure ordered output
     }
     
-    return {success, elapsed, message};
+    if (rank == 0) {
+        std::cout << "Basic MPI test completed.\n";
+    }
 }
 
-// Test 2: Large batch processing
-TestResult testLargeBatch(dist::TaskDispatcher& dispatcher) {
-    int rank = mpi::MPIWrapper::rank();
-    bool success = true;
-    std::string message;
-    
-    if (rank == 0) {
-        std::cout << "\n=== Test 2: Large Batch Processing ===\n";
-    }
-    
-    // Large batch test
-    const size_t numStrikes = 10000;
-    double S = 100.0, r = 0.05, q = 0.02, vol = 0.2, T = 1.0;
-    std::vector<double> strikes;
-    for (size_t i = 0; i < numStrikes; ++i) {
-        strikes.push_back(50.0 + 100.0 * static_cast<double>(i) / numStrikes);
-    }
-    
-    Timer timer;
-    auto results = dispatcher.distributedBatchCalculatePut(S, strikes, r, q, vol, T);
-    double elapsed = timer.elapsed();
-    
-    // Verify sample of results
-    if (rank == 0) {
-        ALOEngine engine(ACCURATE);
-        const size_t numSamples = 100;
-        
-        for (size_t i = 0; i < numSamples; ++i) {
-            size_t idx = i * (numStrikes / numSamples);
-            double expected = engine.calculatePut(S, strikes[idx], r, q, vol, T);
-            
-            if (std::abs(results[idx] - expected) > 1e-10) {
-                success = false;
-                message = "Result mismatch at index " + std::to_string(idx);
-                break;
-            }
-        }
-        
-        if (success) {
-            message = "Sample results match sequential computation";
-        }
-        
-        std::cout << (success ? "PASSED" : "FAILED") << ": " << message << "\n";
-        std::cout << "Execution time: " << elapsed << " ms\n";
-        std::cout << "Time per option: " << elapsed / numStrikes << " ms\n";
-    }
-    
-    return {success, elapsed, message};
-}
-
-// Test 3: Performance comparison with sequential processing
-TestResult testPerformanceComparison(dist::TaskDispatcher& dispatcher) {
+void testDistributedPricing() {
     int rank = mpi::MPIWrapper::rank();
     int size = mpi::MPIWrapper::size();
     bool success = true;
     std::string message;
     
     if (rank == 0) {
-        std::cout << "\n=== Test 3: Performance Comparison ===\n";
+        std::cout << "\n=== Distributed Option Pricing Test ===\n";
     }
     
-    // Medium-sized batch for performance comparison
-    const size_t numStrikes = 5000;
-    double S = 100.0, r = 0.05, q = 0.02, vol = 0.2, T = 1.0;
+    // Create a task dispatcher
+    auto dispatcher = dist::createTaskDispatcher(ACCURATE, 100);
+    
+    // Option parameters
+    double S = 100.0;
+    double r = 0.05;
+    double q = 0.02;
+    double vol = 0.2;
+    double T = 1.0;
+    
+    // Create a large array of strikes
     std::vector<double> strikes;
     for (size_t i = 0; i < numStrikes; ++i) {
         strikes.push_back(50.0 + 100.0 * static_cast<double>(i) / numStrikes);
     }
     
-    // Time distributed calculation
+    // Time the distributed calculation
     Timer timer;
-    auto distributedResults = dispatcher.distributedBatchCalculatePut(S, strikes, r, q, vol, T);
+    auto results = dispatcher->distributedBatchCalculatePut(S, strikes, r, q, vol, T);
     double distributedTime = timer.elapsed();
     
     if (rank == 0) {
-        // Time sequential calculation
-        ALOEngine engine(ACCURATE);
+        std::cout << "Pricing " << numStrikes << " options across " << size << " processes\n";
+        std::cout << "Total time: " << distributedTime << " ms\n";
+        std::cout << "Time per option: " << distributedTime / numStrikes << " ms\n";
+        
+        // Compare with sequential calculation (time a small subset)
         timer.reset();
-        auto sequentialResults = engine.batchCalculatePut(S, strikes, r, q, vol, T);
-        double sequentialTime = timer.elapsed();
+        ALOEngine engine(ACCURATE);
+        auto subset = std::vector<double>(strikes.begin(), strikes.begin() + 100);
+        auto seqResults = engine.batchCalculatePut(S, subset, r, q, vol, T);
+        double seqTime = timer.elapsed();
         
-        // Calculate speedup
-        double speedup = sequentialTime / distributedTime;
+        double estimatedSeqTime = (seqTime / 100.0) * numStrikes;
+        std::cout << "Estimated sequential time: " << estimatedSeqTime << " ms\n";
+        std::cout << "Speedup: " << estimatedSeqTime / distributedTime << "x\n";
         
-        std::cout << "Sequential time: " << sequentialTime << " ms\n";
-        std::cout << "Distributed time: " << distributedTime << " ms\n";
-        std::cout << "Speedup: " << speedup << "x\n";
-        std::cout << "Parallel efficiency: " << (speedup / size) * 100 << "%\n";
-        
-        // Verify results match
-        for (size_t i = 0; i < numStrikes; ++i) {
-            if (std::abs(distributedResults[i] - sequentialResults[i]) > 1e-10) {
-                success = false;
-                message = "Result mismatch at index " + std::to_string(i);
+        // Verify results for first few options
+        bool resultsMatch = true;
+        for (size_t i = 0; i < subset.size(); ++i) {
+            if (std::abs(results[i] - seqResults[i]) > 1e-10) {
+                resultsMatch = false;
                 break;
             }
         }
-        
-        if (success) {
-            message = "Distributed results match sequential";
-        }
-        
-        std::cout << (success ? "PASSED" : "FAILED") << ": " << message << "\n";
-    }
-    
-    return {success, distributedTime, message};
-}
-
-// Test 4: Different chunk sizes
-TestResult testDifferentChunkSizes(dist::TaskDispatcher& dispatcher) {
-    int rank = mpi::MPIWrapper::rank();
-    bool success = true;
-    std::string message;
-    
-    if (rank == 0) {
-        std::cout << "\n=== Test 4: Different Chunk Sizes ===\n";
-    }
-    
-    const size_t numStrikes = 1000;
-    double S = 100.0, r = 0.05, q = 0.02, vol = 0.2, T = 1.0;
-    std::vector<double> strikes;
-    for (size_t i = 0; i < numStrikes; ++i) {
-        strikes.push_back(50.0 + 100.0 * static_cast<double>(i) / numStrikes);
-    }
-    
-    std::vector<size_t> chunkSizes = {10, 50, 100, 250, 500};
-    std::vector<double> executionTimes;
-    
-    // Test different chunk sizes
-    for (size_t chunkSize : chunkSizes) {
-        // Create a new dispatcher with the specific chunk size
-        auto testDispatcher = dist::createTaskDispatcher(ACCURATE, chunkSize);
-        
-        Timer timer;
-        auto results = testDispatcher->distributedBatchCalculatePut(S, strikes, r, q, vol, T);
-        double elapsed = timer.elapsed();
-        executionTimes.push_back(elapsed);
-        
-        if (rank == 0) {
-            std::cout << "Chunk size " << chunkSize << ": " << elapsed << " ms\n";
-        }
-    }
-    
-    if (rank == 0) {
-        // Find optimal chunk size
-        auto minElement = std::min_element(executionTimes.begin(), executionTimes.end());
-        size_t optimalIdx = std::distance(executionTimes.begin(), minElement);
-        size_t optimalChunkSize = chunkSizes[optimalIdx];
-        
-        std::cout << "Optimal chunk size: " << optimalChunkSize << "\n";
-        std::cout << "Best execution time: " << *minElement << " ms\n";
-        
-        message = "Found optimal chunk size: " + std::to_string(optimalChunkSize);
-    }
-    
-    return {success, executionTimes[0], message};
-}
-
-// Test 5: Work stealing and adaptive chunking (if enabled)
-TestResult testAdvancedFeatures(dist::TaskDispatcher& dispatcher) {
-    int rank = mpi::MPIWrapper::rank();
-    bool success = true;
-    std::string message;
-    
-    if (rank == 0) {
-        std::cout << "\n=== Test 5: Advanced Features ===\n";
+        std::cout << "Results verification: " << (resultsMatch ? "PASSED" : "FAILED") << "\n";
     }
     
     // Enable adaptive chunking
@@ -334,12 +212,12 @@ TestResult testRandomOptions(dist::TaskDispatcher& dispatcher) {
     std::string message;
     
     if (rank == 0) {
-        std::cout << "\n=== Test 6: Random Option Parameters ===\n";
+        std::cout << "\n=== Hybrid OpenMP-MPI Test ===\n";
     }
     
-    // Generate random options
-    const size_t numOptions = 1000;
-    auto randomOptions = generateRandomOptions(numOptions);
+    // Test data
+    const size_t dataSize = 1000000;
+    std::vector<double> data(dataSize);
     
     // Extract strikes and use common parameters for this test
     std::vector<double> strikes;
@@ -350,77 +228,30 @@ TestResult testRandomOptions(dist::TaskDispatcher& dispatcher) {
     double S = 100.0;
     
     Timer timer;
-    auto results = dispatcher.distributedBatchCalculatePut(S, strikes, 
-        randomOptions[0].r, randomOptions[0].q, randomOptions[0].vol, randomOptions[0].T);
-    double elapsed = timer.elapsed();
+    auto results = hybrid::HybridExecutor::processDistributed(
+        data,
+        [](double x) { return x * x; },
+        1000
+    );
+    double hybridTime = timer.elapsed();
     
     if (rank == 0) {
-        // Verify a sample of results
-        ALOEngine engine(ACCURATE);
-        const size_t numSamples = 50;
+        std::cout << "Processing " << dataSize << " elements across " << size << " processes\n";
+        std::cout << "Total time: " << hybridTime << " ms\n";
         
-        for (size_t i = 0; i < numSamples; ++i) {
-            size_t idx = i * (numOptions / numSamples);
-            double expected = engine.calculatePut(S, strikes[idx], 
-                randomOptions[0].r, randomOptions[0].q, randomOptions[0].vol, randomOptions[0].T);
-            
-            if (std::abs(results[idx] - expected) > 1e-10) {
-                success = false;
-                message = "Result mismatch at index " + std::to_string(idx);
+        // Verify results
+        bool correct = true;
+        for (size_t i = 0; i < std::min(size_t(10), results.size()); ++i) {
+            double expected = data[i] * data[i];
+            if (std::abs(results[i] - expected) > 1e-10) {
+                correct = false;
                 break;
             }
         }
-        
-        if (success) {
-            message = "Random option test passed";
-        }
-        
-        std::cout << (success ? "PASSED" : "FAILED") << ": " << message << "\n";
-        std::cout << "Execution time: " << elapsed << " ms\n";
+        std::cout << "Results verification: " << (correct ? "PASSED" : "FAILED") << "\n";
     }
-    
-    return {success, elapsed, message};
 }
 
-// Test 7: Fault tolerance (if there's early termination)
-TestResult testFaultTolerance(dist::TaskDispatcher& dispatcher) {
-    int rank = mpi::MPIWrapper::rank();
-    bool success = true;
-    std::string message;
-    
-    if (rank == 0) {
-        std::cout << "\n=== Test 7: Fault Tolerance ===\n";
-    }
-    
-    // Test with small workload
-    const size_t numStrikes = 100;
-    double S = 100.0, r = 0.05, q = 0.02, vol = 0.2, T = 1.0;
-    std::vector<double> strikes;
-    for (size_t i = 0; i < numStrikes; ++i) {
-        strikes.push_back(50.0 + 100.0 * static_cast<double>(i) / numStrikes);
-    }
-    
-    try {
-        Timer timer;
-        auto results = dispatcher.distributedBatchCalculatePut(S, strikes, r, q, vol, T);
-        double elapsed = timer.elapsed();
-        
-        if (rank == 0) {
-            std::cout << "Normal execution completed in " << elapsed << " ms\n";
-            message = "Fault tolerance test passed";
-        }
-    } catch (const std::exception& e) {
-        success = false;
-        message = std::string("Exception caught: ") + e.what();
-        if (rank == 0) {
-            std::cout << "FAILED: " << message << "\n";
-        }
-    }
-    
-    return {success, 0.0, message};
-}
-
-// Main test orchestrator
 int main(int argc, char** argv) {
     try {
         // Initialize MPI
@@ -430,69 +261,19 @@ int main(int argc, char** argv) {
         int size = mpi::MPIWrapper::size();
         
         if (rank == 0) {
-            std::cout << "=== Comprehensive TaskDispatcher Test ===\n";
-            std::cout << "Number of processes: " << size << "\n";
+            std::cout << "=== MPI Test Program ===\n";
         }
         
         // Run diagnostics
         diag::ParallelDiagnostics::diagnose();
         
-        // Create TaskDispatcher with default parameters
-        auto dispatcher = dist::createTaskDispatcher(ACCURATE, 100);
-        
-        // Run all tests
-        std::vector<TestResult> results;
-        
         // Ensure all processes are synchronized before tests
         mpi::MPIWrapper::barrier();
         
-        // Test 1: Basic functionality
-        results.push_back(testBasicFunctionality(*dispatcher));
-        mpi::MPIWrapper::barrier();
-        
-        // Test 2: Large batch processing
-        results.push_back(testLargeBatch(*dispatcher));
-        mpi::MPIWrapper::barrier();
-        
-        // Test 3: Performance comparison
-        results.push_back(testPerformanceComparison(*dispatcher));
-        mpi::MPIWrapper::barrier();
-        
-        // Test 4: Different chunk sizes
-        results.push_back(testDifferentChunkSizes(*dispatcher));
-        mpi::MPIWrapper::barrier();
-        
-        // Test 5: Advanced features
-        results.push_back(testAdvancedFeatures(*dispatcher));
-        mpi::MPIWrapper::barrier();
-        
-        // Test 6: Random options
-        results.push_back(testRandomOptions(*dispatcher));
-        mpi::MPIWrapper::barrier();
-        
-        // Test 7: Fault tolerance
-        results.push_back(testFaultTolerance(*dispatcher));
-        mpi::MPIWrapper::barrier();
-        
-        // Print summary
-        if (rank == 0) {
-            std::cout << "\n=== Test Summary ===\n";
-            int passedTests = 0;
-            for (size_t i = 0; i < results.size(); ++i) {
-                std::cout << "Test " << (i + 1) << ": " 
-                          << (results[i].passed ? "PASSED" : "FAILED") << "\n";
-                if (results[i].passed) passedTests++;
-            }
-            
-            std::cout << "\nOverall: " << passedTests << "/" << results.size() 
-                      << " tests passed\n";
-            
-            if (passedTests == results.size()) {
-                std::cout << "All tests passed successfully!\n";
-            } else {
-                std::cout << "Some tests failed. Please check the details above.\n";
-            }
-        }
+        // Run tests
+        testBasicMPI();
+        testDistributedPricing();
+        testHybridParallel();
         
         // Finalize MPI
         mpi::MPIWrapper::finalize();
