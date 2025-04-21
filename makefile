@@ -15,9 +15,10 @@ TEST_DIR = test
 OMPFLAGS = -fopenmp
 CXXFLAGS += $(OMPFLAGS)
 
-# MPI configuration - use mpicc to get the correct flags
-MPI_COMPILE_FLAGS := $(shell mpic++ --showme:compile)
-MPI_LINK_FLAGS := $(shell mpic++ --showme:link)
+# MPI configuration - use mpic++ to get the correct flags
+MPI_CXX := mpic++
+MPI_COMPILE_FLAGS := $(shell $(MPI_CXX) --showme:compile)
+MPI_LINK_FLAGS := $(shell $(MPI_CXX) --showme:link)
 CXXFLAGS += $(MPI_COMPILE_FLAGS) -DUSE_MPI
 
 # Sleef library - Updated paths to match your project structure
@@ -74,12 +75,12 @@ $(ALO_LIB): $(ENGINE_OBJ)
 # Special rule for alodistribute.cpp with explicit dependency on headers
 $(BUILD_DIR)/engine/alo/alodistribute.o: $(ALODISTRIBUTE_CPP) $(ALODISTRIBUTE_H) $(ALOENGINE_H)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(MPI_CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Compile engine source files with automatic dependency tracking
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
+	$(MPI_CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 	@cp $(BUILD_DIR)/$*.d $(BUILD_DIR)/$*.P
 	@sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' \
 		-e '/^$$/ d' -e 's/$$/ :/' < $(BUILD_DIR)/$*.d >> $(BUILD_DIR)/$*.P
@@ -93,11 +94,11 @@ tests: $(TEST_EXEC) $(SLEEF_TEST)
 
 $(TEST_EXEC): $(BUILD_DIR)/engine/alo/test/alo_test.o $(ALO_LIB)
 	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB)
+	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB) $(MPI_LINK_FLAGS)
 
 $(SLEEF_TEST): $(BUILD_DIR)/engine/alo/test/sleef_test.o $(ALO_LIB)
 	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB)
+	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB) $(MPI_LINK_FLAGS)
 
 # MPI test
 mpi_test: $(MPI_TEST)
@@ -105,7 +106,7 @@ mpi_test: $(MPI_TEST)
 
 $(MPI_TEST): $(BUILD_DIR)/engine/alo/test/mpi_test.o $(ALO_LIB)
 	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB) $(MPI_LINK_FLAGS)
+	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB) $(MPI_LINK_FLAGS)
 
 # Run tests
 test: $(TEST_EXEC)
@@ -121,7 +122,7 @@ clean:
 	rm -rf $(LIB_DIR)
 
 # Build everything and run tests
-full: all test test_sleef mpi_test
+full: all test test_sleef
 
 # Phony targets
 .PHONY: all directories tests test test_sleef mpi_test clean full

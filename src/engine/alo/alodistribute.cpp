@@ -1,6 +1,7 @@
 #include "alodistribute.h"
 #include "aloengine.h"
-#include "aloscheme.h"  
+#include "aloscheme.h"
+#include "mpi_wrapper.h"
 #include <stdexcept>
 #include <algorithm>
 #include <chrono>
@@ -16,20 +17,14 @@ TaskDispatcher::TaskDispatcher(ALOScheme engineScheme, size_t chunkSize)
     : chunkSize_(chunkSize), terminated_(false), adaptiveChunking_(false), 
       workStealingThreshold_(0.75) {
     
-    // Initialize MPI with thread support
-    int initialized;
-    MPI_Initialized(&initialized);
-    if (!initialized) {
-        int provided;
-        MPI_Init_thread(nullptr, nullptr, MPI_THREAD_MULTIPLE, &provided);
-        if (provided < MPI_THREAD_MULTIPLE) {
-            throw std::runtime_error("MPI does not provide required thread support");
-        }
+    // Use the new wrapper instead of direct MPI calls
+    try {
+        mpi::MPIWrapper::init(nullptr, nullptr);
+        rank_ = mpi::MPIWrapper::rank();
+        worldSize_ = mpi::MPIWrapper::size();
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("MPI initialization failed: ") + e.what());
     }
-    
-    // Get rank and size
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
-    MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
     
     // Create local engine
     localEngine_ = std::make_unique<ALOEngine>(engineScheme);
@@ -55,11 +50,7 @@ TaskDispatcher::~TaskDispatcher() {
     if (profilingThread_.joinable()) profilingThread_.join();
     
     // Finalize MPI if we initialized it
-    int finalized;
-    MPI_Finalized(&finalized);
-    if (!finalized) {
-        MPI_Finalize();
-    }
+    mpi::MPIWrapper::finalize();
 }
 
 std::vector<double> TaskDispatcher::distributedBatchCalculatePut(
@@ -82,7 +73,7 @@ std::vector<double> TaskDispatcher::distributedBatchCalculatePut(
         workerNodeOptimized();
         
         // Receive final results
-        MPI_Bcast(results.data(), n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        mpi::MPIWrapper::bcast(results.data(), n, MPI_DOUBLE, 0);
     }
     
     return results;
@@ -136,11 +127,11 @@ std::vector<double> TaskDispatcher::masterNodeProcessingAdvanced(
     // Signal termination to all workers
     for (int node = 1; node < worldSize_; ++node) {
         int terminate = 1;
-        MPI_Send(&terminate, 1, MPI_INT, node, TAG_TERMINATE, MPI_COMM_WORLD);
+        mpi::MPIWrapper::send(&terminate, 1, MPI_INT, node, TAG_TERMINATE);
     }
     
     // Broadcast final results
-    MPI_Bcast(results.data(), n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    mpi::MPIWrapper::bcast(results.data(), n, MPI_DOUBLE, 0);
     
     return results;
 }
@@ -151,20 +142,20 @@ void TaskDispatcher::sendWorkToNodeNonBlocking(int node, const WorkItem& work) {
     
     // Use immediate send for improved performance
     MPI_Request req;
-    MPI_Isend(params, 5, MPI_DOUBLE, node, TAG_PARAMETERS, MPI_COMM_WORLD, &req);
+    mpi::MPIWrapper::isend(params, 5, MPI_DOUBLE, node, TAG_PARAMETERS, &req);
     MPI_Request_free(&req);  // Complete the send in the background
     
     // Send chunk size
     size_t chunkSize = work.strikes.size();
-    MPI_Isend(&chunkSize, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_SIZE, MPI_COMM_WORLD, &req);
+    mpi::MPIWrapper::isend(&chunkSize, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_SIZE, &req);
     MPI_Request_free(&req);
     
     // Send start index
-    MPI_Isend(&work.startIdx, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_DATA, MPI_COMM_WORLD, &req);
+    mpi::MPIWrapper::isend(&work.startIdx, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_DATA, &req);
     MPI_Request_free(&req);
     
     // Send strikes array
-    MPI_Isend(work.strikes.data(), chunkSize, MPI_DOUBLE, node, TAG_CHUNK_DATA, MPI_COMM_WORLD, &req);
+    mpi::MPIWrapper::isend(work.strikes.data(), chunkSize, MPI_DOUBLE, node, TAG_CHUNK_DATA, &req);
     MPI_Request_free(&req);
     
     // Update metrics
@@ -212,13 +203,11 @@ void TaskDispatcher::receiveResultsNonBlocking(int node, std::vector<double>& re
         std::vector<double> chunkResults(count);
         
         // Receive results
-        MPI_Recv(chunkResults.data(), count, MPI_DOUBLE, node, TAG_RESULTS, 
-                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mpi::MPIWrapper::recv(chunkResults.data(), count, MPI_DOUBLE, node, TAG_RESULTS);
         
         // Receive start index for this chunk
         size_t startIdx;
-        MPI_Recv(&startIdx, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_DATA, 
-                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mpi::MPIWrapper::recv(&startIdx, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_DATA);
         
         // Copy results to the main array
         std::copy(chunkResults.begin(), chunkResults.end(), results.begin() + startIdx);
@@ -256,13 +245,13 @@ void TaskDispatcher::workerThreadFunc() {
             
             // Send results back to master using non-blocking send
             MPI_Request req;
-            MPI_Isend(results.data(), results.size(), MPI_DOUBLE, 
-                     0, TAG_RESULTS, MPI_COMM_WORLD, &req);
+            mpi::MPIWrapper::isend(results.data(), results.size(), MPI_DOUBLE, 
+                                  0, TAG_RESULTS, &req);
             MPI_Request_free(&req);
             
             // Send start index
-            MPI_Isend(&workItem.startIdx, 1, MPI_UNSIGNED_LONG, 
-                     0, TAG_CHUNK_DATA, MPI_COMM_WORLD, &req);
+            mpi::MPIWrapper::isend(&workItem.startIdx, 1, MPI_UNSIGNED_LONG, 
+                                  0, TAG_CHUNK_DATA, &req);
             MPI_Request_free(&req);
             
             // Update metrics
@@ -312,13 +301,13 @@ bool TaskDispatcher::attemptWorkStealing() {
     
     // Send work stealing request
     int request = 1;
-    MPI_Send(&request, 1, MPI_INT, victim, TAG_WORK_REQUEST, MPI_COMM_WORLD);
+    mpi::MPIWrapper::send(&request, 1, MPI_INT, victim, TAG_WORK_REQUEST);
     
     // Wait for response with timeout
     MPI_Status status;
     int flag = 0;
     MPI_Request recv_req;
-    MPI_Irecv(&request, 1, MPI_INT, victim, TAG_WORK_RESPONSE, MPI_COMM_WORLD, &recv_req);
+    mpi::MPIWrapper::irecv(&request, 1, MPI_INT, victim, TAG_WORK_RESPONSE, &recv_req);
     
     // Wait for response with timeout
     for (int i = 0; i < 50 && !flag; ++i) {  // 500ms timeout
@@ -348,8 +337,7 @@ void TaskDispatcher::workerNodeOptimized() {
         int terminate = 0;
         MPI_Iprobe(0, TAG_TERMINATE, MPI_COMM_WORLD, &terminate, &status);
         if (terminate) {
-            MPI_Recv(&terminate, 1, MPI_INT, 0, TAG_TERMINATE, 
-                   MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            mpi::MPIWrapper::recv(&terminate, 1, MPI_INT, 0, TAG_TERMINATE);
             break;
         }
         
@@ -367,8 +355,7 @@ void TaskDispatcher::workerNodeOptimized() {
         }
         
         // Receive parameters
-        MPI_Recv(params, 5, MPI_DOUBLE, 0, TAG_PARAMETERS, 
-               MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mpi::MPIWrapper::recv(params, 5, MPI_DOUBLE, 0, TAG_PARAMETERS);
         
         // Extract parameters
         double S = params[0];
@@ -379,18 +366,15 @@ void TaskDispatcher::workerNodeOptimized() {
         
         // Receive chunk size
         size_t chunkSize;
-        MPI_Recv(&chunkSize, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_SIZE, 
-               MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mpi::MPIWrapper::recv(&chunkSize, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_SIZE);
         
         // Receive start index
         size_t startIdx;
-        MPI_Recv(&startIdx, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_DATA, 
-               MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mpi::MPIWrapper::recv(&startIdx, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_DATA);
         
         // Receive strikes
         std::vector<double> strikes(chunkSize);
-        MPI_Recv(strikes.data(), chunkSize, MPI_DOUBLE, 0, TAG_CHUNK_DATA, 
-               MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mpi::MPIWrapper::recv(strikes.data(), chunkSize, MPI_DOUBLE, 0, TAG_CHUNK_DATA);
         
         // Process chunk
         auto start = std::chrono::high_resolution_clock::now();
@@ -399,12 +383,10 @@ void TaskDispatcher::workerNodeOptimized() {
         auto end = std::chrono::high_resolution_clock::now();
         
         // Send results back
-        MPI_Send(results.data(), results.size(), MPI_DOUBLE, 
-               0, TAG_RESULTS, MPI_COMM_WORLD);
+        mpi::MPIWrapper::send(results.data(), results.size(), MPI_DOUBLE, 0, TAG_RESULTS);
         
         // Send start index
-        MPI_Send(&startIdx, 1, MPI_UNSIGNED_LONG, 
-               0, TAG_CHUNK_DATA, MPI_COMM_WORLD);
+        mpi::MPIWrapper::send(&startIdx, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_DATA);
         
         // Update metrics
         double processingTime = std::chrono::duration<double, std::milli>(end - start).count();
@@ -465,8 +447,8 @@ void TaskDispatcher::performLoadBalancing() {
     // Query each node for its load (excluding master)
     for (int node = 1; node < worldSize_; ++node) {
         int load = 0;
-        MPI_Send(&load, 1, MPI_INT, node, TAG_LOAD_BALANCE, MPI_COMM_WORLD);
-        MPI_Recv(&load, 1, MPI_INT, node, TAG_LOAD_BALANCE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mpi::MPIWrapper::send(&load, 1, MPI_INT, node, TAG_LOAD_BALANCE);
+        mpi::MPIWrapper::recv(&load, 1, MPI_INT, node, TAG_LOAD_BALANCE);
         nodeLoads[node] = load;
     }
     
@@ -508,10 +490,10 @@ void TaskDispatcher::sendWorkToNode(int node, const std::vector<size_t>& workloa
                    double r, double q, double vol, double T, size_t n) {
     // Legacy implementation remains the same as before
     double params[5] = {S, r, q, vol, T};
-    MPI_Send(params, 5, MPI_DOUBLE, node, TAG_PARAMETERS, MPI_COMM_WORLD);
+    mpi::MPIWrapper::send(params, 5, MPI_DOUBLE, node, TAG_PARAMETERS);
     
     auto nodeWorkload = workload[node];
-    MPI_Send(&nodeWorkload, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_COUNT, MPI_COMM_WORLD);
+    mpi::MPIWrapper::send(&nodeWorkload, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_COUNT);
     
     size_t startIdx = 0;
     for (int i = 0; i < node; ++i) {
@@ -523,11 +505,11 @@ void TaskDispatcher::sendWorkToNode(int node, const std::vector<size_t>& workloa
         size_t chunkEnd = std::min(chunkStart + chunkSize_, n);
         size_t chunkSize = chunkEnd - chunkStart;
         
-        MPI_Send(&chunkSize, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_SIZE, MPI_COMM_WORLD);
-        MPI_Send(&chunkStart, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_DATA, MPI_COMM_WORLD);
+        mpi::MPIWrapper::send(&chunkSize, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_SIZE);
+        mpi::MPIWrapper::send(&chunkStart, 1, MPI_UNSIGNED_LONG, node, TAG_CHUNK_DATA);
         
         std::vector<double> chunkStrikes(strikes.begin() + chunkStart, strikes.begin() + chunkEnd);
-        MPI_Send(chunkStrikes.data(), chunkSize, MPI_DOUBLE, node, TAG_CHUNK_DATA, MPI_COMM_WORLD);
+        mpi::MPIWrapper::send(chunkStrikes.data(), chunkSize, MPI_DOUBLE, node, TAG_CHUNK_DATA);
     }
 }
 
@@ -566,8 +548,8 @@ void TaskDispatcher::receiveResultsFromNode(int node, const std::vector<size_t>&
         size_t chunkEnd = std::min(chunkStart + chunkSize_, n);
         size_t chunkSize = chunkEnd - chunkStart;
         
-        MPI_Recv(&results[chunkStart], chunkSize, MPI_DOUBLE, 
-               node, TAG_RESULTS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mpi::MPIWrapper::recv(&results[chunkStart], chunkSize, MPI_DOUBLE, 
+                            node, TAG_RESULTS);
     }
 }
 
@@ -580,8 +562,7 @@ void TaskDispatcher::workerNodeProcessing() {
         int terminate = 0;
         MPI_Iprobe(0, TAG_TERMINATE, MPI_COMM_WORLD, &terminate, &status);
         if (terminate) {
-            MPI_Recv(&terminate, 1, MPI_INT, 0, TAG_TERMINATE, 
-                   MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            mpi::MPIWrapper::recv(&terminate, 1, MPI_INT, 0, TAG_TERMINATE);
             break;
         }
         
@@ -593,8 +574,7 @@ void TaskDispatcher::workerNodeProcessing() {
             continue;
         }
         
-        MPI_Recv(params, 5, MPI_DOUBLE, 0, TAG_PARAMETERS, 
-               MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mpi::MPIWrapper::recv(params, 5, MPI_DOUBLE, 0, TAG_PARAMETERS);
         
         double S = params[0];
         double r = params[1];
@@ -603,27 +583,22 @@ void TaskDispatcher::workerNodeProcessing() {
         double T = params[4];
         
         size_t numChunks;
-        MPI_Recv(&numChunks, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_COUNT, 
-               MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mpi::MPIWrapper::recv(&numChunks, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_COUNT);
         
         for (size_t chunk = 0; chunk < numChunks; ++chunk) {
             size_t chunkSize;
-            MPI_Recv(&chunkSize, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_SIZE, 
-                   MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            mpi::MPIWrapper::recv(&chunkSize, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_SIZE);
             
             size_t chunkStart;
-            MPI_Recv(&chunkStart, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_DATA, 
-                   MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            mpi::MPIWrapper::recv(&chunkStart, 1, MPI_UNSIGNED_LONG, 0, TAG_CHUNK_DATA);
             
             std::vector<double> chunkStrikes(chunkSize);
-            MPI_Recv(chunkStrikes.data(), chunkSize, MPI_DOUBLE, 0, TAG_CHUNK_DATA, 
-                   MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            mpi::MPIWrapper::recv(chunkStrikes.data(), chunkSize, MPI_DOUBLE, 0, TAG_CHUNK_DATA);
             
             std::vector<double> chunkResults = localEngine_->batchCalculatePut(
                 S, chunkStrikes, r, q, vol, T);
             
-            MPI_Send(chunkResults.data(), chunkSize, MPI_DOUBLE, 
-                   0, TAG_RESULTS, MPI_COMM_WORLD);
+            mpi::MPIWrapper::send(chunkResults.data(), chunkSize, MPI_DOUBLE, 0, TAG_RESULTS);
         }
         
         signalReadiness(S, r, q, vol, T);
@@ -639,7 +614,7 @@ void TaskDispatcher::implementWorkStealing(
 
 void TaskDispatcher::signalReadiness(double S, double r, double q, double vol, double T) {
     double params[5] = {S, r, q, vol, T};
-    MPI_Send(params, 5, MPI_DOUBLE, 0, TAG_READY, MPI_COMM_WORLD);
+    mpi::MPIWrapper::send(params, 5, MPI_DOUBLE, 0, TAG_READY);
 }
 
 // Implementation of createTaskDispatcher
