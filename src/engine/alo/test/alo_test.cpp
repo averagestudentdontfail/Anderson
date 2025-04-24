@@ -212,7 +212,7 @@ void runParallelPricingTest() {
 /**
  * @brief Run a SIMD optimization test with improved implementation
  */
-void runSimdOptimizationTest() {
+ void runSimdOptimizationTest() {
     std::cout << "\n=== SIMD Optimization Test ===\n";
     
     // Create test data
