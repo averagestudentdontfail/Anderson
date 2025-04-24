@@ -153,4 +153,4 @@ ifneq ($(MAKECMDGOALS),clean)
 endif
 
 .PHONY: all directories tests test test_sleef mpi_test clean full sleef tracy_profiler
-.SECONDARY: $(ENGINE_OBJ) $(TEST_OBJ)
+.SECONDARY: $(ENGINE_OBJ) $(TEST_OBJ)y
