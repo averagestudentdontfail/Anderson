@@ -75,7 +75,7 @@ directories:
                $(BUILD_DIR)/engine/alo/opt \
                $(BUILD_DIR)/engine/alo/test \
                $(BIN_DIR) \
-               $(LIB_DIR)
+               $(LIB_DIR) \
                $(BUILD_DIR)/engine/alo/num \
                $(BUILD_DIR)/engine/alo/opt \
                $(BUILD_DIR)/engine/alo/test \
