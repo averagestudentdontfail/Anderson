@@ -122,7 +122,6 @@ mpi_test: $(MPI_TEST)
 	mpirun -np 4 ./$(MPI_TEST)
 
 # --- Run Targets with Tracy profiling ---
-# --- Run Targets with Tracy profiling ---
 test: $(TEST_EXEC)
 	@echo "Running alo_test with Tracy profiling..."
 	@echo "Running alo_test with Tracy profiling..."
