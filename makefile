@@ -9,6 +9,16 @@ LIB_DIR = lib
 TEST_DIR = test
 PRO_DIR = pro
 
+# Tracy configuration
+TRACY_DIR = tracy
+TRACY_ENABLE = 1
+ifeq ($(TRACY_ENABLE), 1)
+    CXXFLAGS += -DTRACY_ENABLE
+    TRACY_INCLUDES = -I$(TRACY_DIR)/public
+    TRACY_SRC = $(TRACY_DIR)/public/TracyClient.cpp
+    TRACY_OBJ = $(BUILD_DIR)/tracy_client.o
+endif
+
 # OpenMP flags
 OMPFLAGS = -fopenmp
 CXXFLAGS += $(OMPFLAGS)
@@ -19,11 +29,14 @@ MPI_COMPILE_FLAGS := $(shell $(MPI_CXX) --showme:compile 2>/dev/null)
 MPI_LINK_FLAGS := $(shell $(MPI_CXX) --showme:link 2>/dev/null)
 CXXFLAGS += $(MPI_COMPILE_FLAGS) -DUSE_MPI
 
+# SLEEF configuration
+SLEEF_DIR = sleef
+SLEEF_INCLUDES = -I$(SLEEF_DIR)/include
+SLEEF_STATIC_LIB = $(SLEEF_DIR)/lib/libsleef.a
+
 # Other libraries and includes
-SLEEF_INCLUDE = -I$(CURDIR)/vec/include
-SLEEF_LIB = -L$(CURDIR)/vec/lib -lsleef
-PROFILER_LIB = -lprofiler
-INCLUDES = -I$(SRC_DIR) $(SLEEF_INCLUDE)
+INCLUDES = -I$(SRC_DIR) $(SLEEF_INCLUDES) $(TRACY_INCLUDES)
+LIBS = -lpthread -ldl
 
 # Source files
 ALODISTRIBUTE_CPP = $(SRC_DIR)/engine/alo/alodistribute.cpp
@@ -40,20 +53,52 @@ TEST_EXEC = $(BIN_DIR)/alo_test
 SLEEF_TEST = $(BIN_DIR)/sleef_test
 MPI_TEST = $(BIN_DIR)/mpi_test
 
-all: directories $(ALO_LIB) tests
+all: directories sleef $(ALO_LIB) tests tracy_profiler
 
 directories:
 	@mkdir -p $(BUILD_DIR)/engine/alo/mod \
-               $(BUILD_DIR)/engine/alo/num \
-               $(BUILD_DIR)/engine/alo/opt \
-               $(BUILD_DIR)/engine/alo/test \
-               $(BIN_DIR) \
-               $(LIB_DIR)
+	          $(BUILD_DIR)/engine/alo/num \
+	          $(BUILD_DIR)/engine/alo/opt \
+	          $(BUILD_DIR)/engine/alo/test \
+	          $(BIN_DIR) \
+	          $(LIB_DIR)
+
+# Build SLEEF
+sleef: $(SLEEF_STATIC_LIB)
+
+$(SLEEF_STATIC_LIB):
+	@echo "Building SLEEF library..."
+	cd $(SLEEF_DIR) && \
+	mkdir -p build && \
+	cd build && \
+	cmake -DCMAKE_INSTALL_PREFIX=.. \
+	      -DBUILD_SHARED_LIBS=OFF \
+	      -DBUILD_TESTS=OFF \
+	      -DBUILD_DFT=OFF \
+	      -DBUILD_GNUABI_LIBS=OFF \
+	      -DBUILD_INLINE_HEADERS=ON .. && \
+	$(MAKE) && \
+	$(MAKE) install
+
+# Build Tracy Profiler
+tracy_profiler:
+ifeq ($(TRACY_ENABLE), 1)
+	@echo "Building Tracy profiler..."
+	cd $(TRACY_DIR) && \
+	cmake -B profiler/build -S profiler -DCMAKE_BUILD_TYPE=Release && \
+	cmake --build profiler/build --config Release --parallel
+endif
 
 # Build the ALO library
-$(ALO_LIB): $(ENGINE_OBJ)
+$(ALO_LIB): $(ENGINE_OBJ) $(TRACY_OBJ)
 	@echo "Archiving library $@"
 	ar rcs $@ $^
+
+$(TRACY_OBJ): $(TRACY_SRC)
+ifeq ($(TRACY_ENABLE), 1)
+	@echo "Compiling Tracy client: $<"
+	$(CXX) $(CXXFLAGS) $(TRACY_INCLUDES) -c $< -o $@
+endif
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(wildcard $(SRC_DIR)/engine/alo/*.h) $(wildcard $(SRC_DIR)/engine/alo/mod/*.h) $(wildcard $(SRC_DIR)/engine/alo/num/*.h) $(wildcard $(SRC_DIR)/engine/alo/opt/*.h)
 	@mkdir -p $(dir $@)
@@ -67,17 +112,17 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(wildcard $(SRC_DIR)/engine/alo/*.h) $(wildc
 # Build the tests
 tests: $(TEST_EXEC) $(SLEEF_TEST) $(MPI_TEST)
 
-$(TEST_EXEC): $(BUILD_DIR)/engine/alo/test/alo_test.o $(ALO_LIB)
+$(TEST_EXEC): $(BUILD_DIR)/engine/alo/test/alo_test.o $(ALO_LIB) $(SLEEF_STATIC_LIB)
 	@echo "Linking executable $@"
-	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB) $(MPI_LINK_FLAGS) $(PROFILER_LIB) $(LDFLAGS)
+	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_STATIC_LIB) $(MPI_LINK_FLAGS) $(LIBS)
 
-$(SLEEF_TEST): $(BUILD_DIR)/engine/alo/test/sleef_test.o $(ALO_LIB)
+$(SLEEF_TEST): $(BUILD_DIR)/engine/alo/test/sleef_test.o $(ALO_LIB) $(SLEEF_STATIC_LIB)
 	@echo "Linking executable $@"
-	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB) $(MPI_LINK_FLAGS) $(PROFILER_LIB) $(LDFLAGS)
+	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_STATIC_LIB) $(MPI_LINK_FLAGS) $(LIBS)
 
-$(MPI_TEST): $(BUILD_DIR)/engine/alo/test/mpi_test.o $(ALO_LIB)
+$(MPI_TEST): $(BUILD_DIR)/engine/alo/test/mpi_test.o $(ALO_LIB) $(SLEEF_STATIC_LIB)
 	@echo "Linking executable $@"
-	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_LIB) $(MPI_LINK_FLAGS) $(PROFILER_LIB) $(LDFLAGS)
+	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_STATIC_LIB) $(MPI_LINK_FLAGS) $(LIBS)
 
 mpi_test: $(MPI_TEST)
 	mpirun -np 4 ./$(MPI_TEST)
@@ -95,6 +140,10 @@ test_sleef: $(SLEEF_TEST)
 clean:
 	@echo "Cleaning build artifacts..."
 	rm -rf $(BUILD_DIR) $(BIN_DIR) $(LIB_DIR)
+	@echo "Cleaning SLEEF build..."
+	rm -rf $(SLEEF_DIR)/build $(SLEEF_DIR)/lib $(SLEEF_DIR)/include
+	@echo "Cleaning Tracy build..."
+	rm -rf $(TRACY_DIR)/profiler/build
 
 # --- Utility Targets ---
 full: all test test_sleef
@@ -103,5 +152,5 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.P,$(ENGINE_SRC))
 endif
 
-.PHONY: all directories tests test test_sleef mpi_test clean full
+.PHONY: all directories tests test test_sleef mpi_test clean full sleef tracy_profiler
 .SECONDARY: $(ENGINE_OBJ) $(TEST_OBJ)
