@@ -512,31 +512,65 @@ void VectorMath::bsCall(const double* S, const double* K, const double* r,
 }
 
 void VectorMath::expMultSqrt(const double* x, const double* y, double* result, size_t size) {
+    // Process larger chunks if SIMD is available
+    constexpr size_t SIMD_THRESHOLD = 32;
+    constexpr size_t CACHE_LINE_SIZE = 64; // Bytes, typical L1 cache line
+    constexpr size_t DOUBLES_PER_CACHE_LINE = CACHE_LINE_SIZE / sizeof(double);
+    
     // Use scalar operations for small data sizes
-    if (!shouldUseSimd(size)) {
+    if (size < SIMD_THRESHOLD) {
         for (size_t i = 0; i < size; ++i) {
             result[i] = std::exp(x[i]) * std::sqrt(y[i]);
         }
         return;
     }
     
-    // Process in chunks of 4 using AVX2 and SLEEF
+    // Ensure memory is aligned for SIMD operations
     size_t i = 0;
+    
+    // Process unaligned start portion
+    while (i < size && (reinterpret_cast<uintptr_t>(result + i) % 32) != 0) {
+        result[i] = std::exp(x[i]) * std::sqrt(y[i]);
+        i++;
+    }
+    
+    // Process main chunk with SIMD - process in larger blocks to improve cache usage
+    constexpr size_t BLOCK_SIZE = 1024; // Process in blocks of 1KB
+    
+    for (; i + BLOCK_SIZE <= size; i += BLOCK_SIZE) {
+        // Process the block with SIMD
+        for (size_t j = 0; j < BLOCK_SIZE; j += 4) {
+            // Load 4 values from each array
+            __m256d x_vec = _mm256_loadu_pd(x + i + j);
+            __m256d y_vec = _mm256_loadu_pd(y + i + j);
+            
+            // Calculate exp(x) using SLEEF
+            __m256d exp_x = Sleef_expd4_u10avx2(x_vec);
+            
+            // Calculate sqrt(y) using AVX2 native sqrt (very fast)
+            __m256d sqrt_y = _mm256_sqrt_pd(y_vec);
+            
+            // Multiply the results
+            __m256d result_vec = _mm256_mul_pd(exp_x, sqrt_y);
+            
+            // Store the result with aligned store if possible
+            if ((reinterpret_cast<uintptr_t>(result + i + j) % 32) == 0) {
+                _mm256_store_pd(result + i + j, result_vec);
+            } else {
+                _mm256_storeu_pd(result + i + j, result_vec);
+            }
+        }
+    }
+    
+    // Process remaining blocks of 4
     for (; i + 3 < size; i += 4) {
-        // Load 4 values from each array
         __m256d x_vec = _mm256_loadu_pd(x + i);
         __m256d y_vec = _mm256_loadu_pd(y + i);
         
-        // Calculate exp(x) using SLEEF
         __m256d exp_x = Sleef_expd4_u10avx2(x_vec);
-        
-        // Calculate sqrt(y) using AVX2 native sqrt (very fast)
         __m256d sqrt_y = _mm256_sqrt_pd(y_vec);
-        
-        // Multiply the results
         __m256d result_vec = _mm256_mul_pd(exp_x, sqrt_y);
         
-        // Store the result
         _mm256_storeu_pd(result + i, result_vec);
     }
     
