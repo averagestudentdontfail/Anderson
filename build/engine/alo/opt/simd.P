@@ -1,6 +1,6 @@
 src/engine/alo/opt/simd.cpp:
 src/engine/alo/opt/simd.h:
-/home/send2/.projects/Anderson/vec/include/sleef.h:
+sleef/include/sleef.h:
 src/engine/alo/opt/../aloengine.h:
 src/engine/alo/opt/../aloscheme.h:
 src/engine/alo/opt/../alodistribute.h:

@@ -43,7 +43,7 @@ src/engine/alo/num/integrator.h:
 src/engine/alo/num/chebyshev.h:
 src/engine/alo/opt/cache.h:
 src/engine/alo/opt/simd.h:
-/home/send2/.projects/Anderson/vec/include/sleef.h:
+sleef/include/sleef.h:
 src/engine/alo/opt/vector.h:
 src/engine/alo/opt/simd.h:
 :

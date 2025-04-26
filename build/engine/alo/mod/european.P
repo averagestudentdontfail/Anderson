@@ -1,7 +1,7 @@
 src/engine/alo/mod/european.cpp:
 src/engine/alo/mod/european.h:
 src/engine/alo/mod/../opt/simd.h:
-/home/send2/.projects/Anderson/vec/include/sleef.h:
+sleef/include/sleef.h:
 :
 :
 :
