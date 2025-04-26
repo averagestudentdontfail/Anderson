@@ -41,7 +41,7 @@ src/engine/alo/test/../mod/../num/integrator.h:
 src/engine/alo/test/../mod/european.h:
 src/engine/alo/test/../opt/cache.h:
 src/engine/alo/test/../opt/simd.h:
-/home/send2/.projects/Anderson/vec/include/sleef.h:
+sleef/include/sleef.h:
 src/engine/alo/test/../opt/vector.h:
 src/engine/alo/test/../opt/simd.h:
 :

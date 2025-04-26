@@ -1,5 +1,5 @@
 src/engine/alo/test/sleef_test.cpp:
-/home/send2/.projects/Anderson/vec/include/sleef.h:
+sleef/include/sleef.h:
 src/engine/alo/test/../opt/simd.h:
 src/engine/alo/test/../opt/vector.h:
 src/engine/alo/test/../opt/simd.h:
