@@ -9,16 +9,6 @@ LIB_DIR = lib
 TEST_DIR = test
 PRO_DIR = pro
 
-# Tracy configuration
-TRACY_DIR = tracy
-TRACY_ENABLE = 1
-ifeq ($(TRACY_ENABLE), 1)
-    CXXFLAGS += -DTRACY_ENABLE
-    TRACY_INCLUDES = -I$(TRACY_DIR)/public
-    TRACY_SRC = $(TRACY_DIR)/public/TracyClient.cpp
-    TRACY_OBJ = $(BUILD_DIR)/tracy_client.o
-endif
-
 # OpenMP flags
 OMPFLAGS = -fopenmp
 CXXFLAGS += $(OMPFLAGS)
@@ -35,7 +25,7 @@ SLEEF_INCLUDES = -I$(SLEEF_DIR)/include
 SLEEF_STATIC_LIB = $(SLEEF_DIR)/lib/libsleef.a
 
 # Other libraries and includes
-INCLUDES = -I$(SRC_DIR) $(SLEEF_INCLUDES) $(TRACY_INCLUDES)
+INCLUDES = -I$(SRC_DIR) $(SLEEF_INCLUDES)
 LIBS = -lpthread -ldl
 
 # Source files
@@ -53,7 +43,7 @@ TEST_EXEC = $(BIN_DIR)/alo_test
 SLEEF_TEST = $(BIN_DIR)/sleef_test
 MPI_TEST = $(BIN_DIR)/mpi_test
 
-all: directories sleef $(ALO_LIB) tests tracy_profiler
+all: directories sleef $(ALO_LIB) tests
 
 directories:
 	@mkdir -p $(BUILD_DIR)/engine/alo/mod \
@@ -80,25 +70,10 @@ $(SLEEF_STATIC_LIB):
 	$(MAKE) && \
 	$(MAKE) install
 
-# Build Tracy Profiler
-tracy_profiler:
-ifeq ($(TRACY_ENABLE), 1)
-	@echo "Building Tracy profiler..."
-	cd $(TRACY_DIR) && \
-	cmake -B profiler/build -S profiler -DCMAKE_BUILD_TYPE=Release && \
-	cmake --build profiler/build --config Release --parallel
-endif
-
 # Build the ALO library
-$(ALO_LIB): $(ENGINE_OBJ) $(TRACY_OBJ)
+$(ALO_LIB): $(ENGINE_OBJ)
 	@echo "Archiving library $@"
 	ar rcs $@ $^
-
-$(TRACY_OBJ): $(TRACY_SRC)
-ifeq ($(TRACY_ENABLE), 1)
-	@echo "Compiling Tracy client: $<"
-	$(CXX) $(CXXFLAGS) $(TRACY_INCLUDES) -c $< -o $@
-endif
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(wildcard $(SRC_DIR)/engine/alo/*.h) $(wildcard $(SRC_DIR)/engine/alo/mod/*.h) $(wildcard $(SRC_DIR)/engine/alo/num/*.h) $(wildcard $(SRC_DIR)/engine/alo/opt/*.h)
 	@mkdir -p $(dir $@)
@@ -142,8 +117,6 @@ clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR) $(LIB_DIR)
 	@echo "Cleaning SLEEF build..."
 	rm -rf $(SLEEF_DIR)/build $(SLEEF_DIR)/lib $(SLEEF_DIR)/include
-	@echo "Cleaning Tracy build..."
-	rm -rf $(TRACY_DIR)/profiler/build
 
 # --- Utility Targets ---
 full: all test test_sleef
@@ -152,5 +125,5 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.P,$(ENGINE_SRC))
 endif
 
-.PHONY: all directories tests test test_sleef mpi_test clean full sleef tracy_profiler
-.SECONDARY: $(ENGINE_OBJ) $(TEST_OBJ)y
+.PHONY: all directories tests test test_sleef mpi_test clean full sleef
+.SECONDARY: $(ENGINE_OBJ) $(TEST_OBJ)
