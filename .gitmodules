@@ -1,6 +1,3 @@
-[submodule "tracy"]
-	path = tracy
-	url = https://github.com/wolfpld/tracy.git
 [submodule "sleef"]
 	path = sleef
 	url = https://github.com/shibatch/sleef.git
