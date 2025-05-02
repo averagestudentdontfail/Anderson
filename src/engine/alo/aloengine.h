@@ -329,6 +329,21 @@ public:
     void processSIMDChunk(double S, const double* strikes, double r, double q, 
                         double vol, double T, double* results, size_t size) const;
     
+    /**
+     * @brief Process options using single-precision floats for better SIMD performance
+     */
+    std::vector<float> batchCalculatePutFloat(
+        float S, const std::vector<float>& strikes,
+        float r, float q, float vol, float T) const;
+                        
+    #ifdef __AVX512F__
+    /**
+     * @brief Process a chunk of options using AVX-512 SIMD
+     */
+    void processAVX512Chunk(double S, const double* strikes, double r, double q,
+                          double vol, double T, double* results, size_t size) const;
+    #endif
+    
 private:
     /**
      * @brief Implementation of American put option pricing
@@ -382,6 +397,12 @@ private:
     double calculateCallExercisePremium(
         double S, double K, double r, double q, double vol, double T,
         const std::shared_ptr<num::ChebyshevInterpolation>& boundary) const;
+    
+    /**
+     * @brief Helper to calculate put early exercise premium for SIMD chunks
+     */
+    __m256d calculatePutPremium4(__m256d S, __m256d K, __m256d r, __m256d q, 
+                              __m256d vol, __m256d T) const;
     
     /**
      * @class FixedPointEvaluator

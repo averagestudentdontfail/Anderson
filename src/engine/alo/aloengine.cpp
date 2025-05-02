@@ -365,7 +365,7 @@ void ALOEngine::processAmericanPutChunk(const double* S, const double* K, const 
     }
 }
 
-// NEW OPTIMIZED IMPLEMENTATION - SIMD Chunk Processing
+// SIMD Chunk Processing 
 void ALOEngine::processSIMDChunk(double S, const double* strikes, double r, double q, 
                           double vol, double T, double* results, size_t size) const {
     // Process in SIMD width (4 for AVX2) chunks
@@ -383,8 +383,7 @@ void ALOEngine::processSIMDChunk(double S, const double* strikes, double r, doub
     }
     
     if (use_european) {
-        // Vectorized European pricing using opt::VectorMath
-        // Create arrays with constant values for the parameters except strikes
+        // Use optimized batch processing for European options
         std::vector<double> spots(size, S);
         std::vector<double> rates(size, r);
         std::vector<double> dividends(size, q);
@@ -411,6 +410,41 @@ void ALOEngine::processSIMDChunk(double S, const double* strikes, double r, doub
     }
 }
 
+// Helper method to calculate put early exercise premium for SIMD chunks
+__m256d ALOEngine::calculatePutPremium4(__m256d S, __m256d K, __m256d r, __m256d q, 
+                                     __m256d vol, __m256d T) const {
+    // This is a simplified approximation for illustration 
+    __m256d zero = _mm256_setzero_pd();
+    
+    // Check r > q (early exercise only valuable in this case)
+    __m256d r_gt_q = _mm256_cmp_pd(r, q, _CMP_GT_OQ);
+    
+    // If r <= q, return zero premium
+    if (_mm256_movemask_pd(r_gt_q) == 0) {
+        return zero;
+    }
+    
+    // For a rough approximation, use quadratic approximation method
+    // Premium ≈ max(0, K-S) * (1 - exp(-(r-q)*T))
+    
+    // Calculate K-S
+    __m256d K_minus_S = _mm256_sub_pd(K, S);
+    __m256d intrinsic = _mm256_max_pd(zero, K_minus_S);
+    
+    // Calculate 1 - exp(-(r-q)*T)
+    __m256d r_minus_q = _mm256_sub_pd(r, q);
+    __m256d neg_rmq_T = _mm256_mul_pd(_mm256_mul_pd(r_minus_q, T), _mm256_set1_pd(-1.0));
+    __m256d exp_term = Sleef_expd4_u10avx2(neg_rmq_T);
+    __m256d one = _mm256_set1_pd(1.0);
+    __m256d discount = _mm256_sub_pd(one, exp_term);
+    
+    // Calculate premium = intrinsic * discount * indicator(r > q)
+    __m256d premium = _mm256_mul_pd(intrinsic, discount);
+    
+    // Apply the r > q condition using the mask
+    return _mm256_and_pd(premium, _mm256_castsi256_pd(_mm256_castpd_si256(r_gt_q)));
+}
+
 // NEW OPTIMIZED IMPLEMENTATION - Batch Calculate Put
 std::vector<double> ALOEngine::batchCalculatePut(double S, const std::vector<double>& strikes,
                                               double r, double q, double vol, double T) const {
@@ -422,7 +456,10 @@ std::vector<double> ALOEngine::batchCalculatePut(double S, const std::vector<dou
     // Check for European-only condition once (r <= 0.0 && r <= q)
     bool use_european = (r <= 0.0 && r <= q);
     
-    // Determine optimal processing strategy based on batch size
+    // Determine SIMD capabilities
+    opt::SIMDSupport simdLevel = opt::detectSIMDSupport();
+    
+    // Choose appropriate strategy based on batch size and SIMD support
     if (n <= 8) {
         // Strategy 1: For very small batches, use scalar computation
         if (use_european) {
@@ -440,9 +477,31 @@ std::vector<double> ALOEngine::batchCalculatePut(double S, const std::vector<dou
         processSIMDChunk(S, strikes.data(), r, q, vol, T, results.data(), n);
     }
     else {
-        // Strategy 3: For larger batches, use OpenMP parallelization
-        // Prefer using parallelBatchCalculatePut for large batches
-        return parallelBatchCalculatePut(S, strikes, r, q, vol, T);
+        // Strategy 3: For larger batches, choose based on SIMD support
+        #ifdef __AVX512F__
+        if (simdLevel >= opt::AVX512 && use_european) {
+            // Use AVX-512 for large European option batches
+            processAVX512Chunk(S, strikes.data(), r, q, vol, T, results.data(), n);
+        } else
+        #endif
+        if (use_european) {
+            // Use optimized batch processing for European options
+            std::vector<double> spots(n, S);
+            std::vector<double> rates(n, r);
+            std::vector<double> dividends(n, q);
+            std::vector<double> vols(n, vol);
+            std::vector<double> times(n, T);
+            
+            opt::VectorMath::bsPut(
+                spots.data(), strikes.data(), 
+                rates.data(), dividends.data(),
+                vols.data(), times.data(),
+                results.data(), n
+            );
+        } else {
+            // For American options, use parallelized approach
+            return parallelBatchCalculatePut(S, strikes, r, q, vol, T);
+        }
     }
     
     return results;
@@ -640,6 +699,120 @@ std::vector<double> ALOEngine::parallelBatchCalculatePut(double S, const std::ve
     
     return results;
 }
+
+// NEW IMPLEMENTATION - Process options using single-precision floats
+std::vector<float> ALOEngine::batchCalculatePutFloat(
+    float S, const std::vector<float>& strikes,
+    float r, float q, float vol, float T) const {
+    
+    // Create batch in SoA layout
+    opt::OptionBatch batch;
+    batch.resize(strikes.size());
+    
+    // Fill batch data
+    std::fill(batch.spots.begin(), batch.spots.end(), S);
+    std::copy(strikes.begin(), strikes.end(), batch.strikes.begin());
+    std::fill(batch.rates.begin(), batch.rates.end(), r);
+    std::fill(batch.dividends.begin(), batch.dividends.end(), q);
+    std::fill(batch.vols.begin(), batch.vols.end(), vol);
+    std::fill(batch.times.begin(), batch.times.end(), T);
+    
+    // Check if European-only condition (r <= 0.0 && r <= q)
+    bool use_european = (r <= 0.0 && r <= q);
+    
+    // Process batch with cache-optimized function
+    const size_t total_size = batch.size();
+    
+    // Process in cache-line sized blocks for better memory locality
+    constexpr size_t CACHE_LINE_SIZE = 64; // 64 bytes = typical L1 cache line
+    constexpr size_t FLOATS_PER_CACHE_LINE = CACHE_LINE_SIZE / sizeof(float);
+    constexpr size_t BLOCK_SIZE = FLOATS_PER_CACHE_LINE * 16; // Process 16 cache lines at once
+    
+    // Allocate temporary storage for processing
+    std::vector<double> block_spots(BLOCK_SIZE);
+    std::vector<double> block_strikes(BLOCK_SIZE);
+    std::vector<double> block_rates(BLOCK_SIZE);
+    std::vector<double> block_dividends(BLOCK_SIZE);
+    std::vector<double> block_vols(BLOCK_SIZE);
+    std::vector<double> block_times(BLOCK_SIZE);
+    std::vector<double> block_results(BLOCK_SIZE);
+    
+    // Process main blocks using SIMD
+    #ifdef _OPENMP
+    #pragma omp parallel for schedule(dynamic)
+    #endif
+    for (size_t block_start = 0; block_start < total_size; block_start += BLOCK_SIZE) {
+        size_t block_end = std::min(block_start + BLOCK_SIZE, total_size);
+        size_t block_size = block_end - block_start;
+        
+        // Convert block from float to double for processing
+        for (size_t i = 0; i < block_size; ++i) {
+            block_spots[i] = batch.spots[block_start + i];
+            block_strikes[i] = batch.strikes[block_start + i];
+            block_rates[i] = batch.rates[block_start + i];
+            block_dividends[i] = batch.dividends[block_start + i];
+            block_vols[i] = batch.vols[block_start + i];
+            block_times[i] = batch.times[block_start + i];
+        }
+        
+        // Use appropriate pricing function
+        if (use_european) {
+            // European pricing is simpler and faster
+            opt::VectorMath::bsPut(
+                block_spots.data(), block_strikes.data(),
+                block_rates.data(), block_dividends.data(),
+                block_vols.data(), block_times.data(),
+                block_results.data(), block_size
+            );
+        } else {
+            // For American options, use approximation for better performance
+            opt::VectorMath::americanPutApprox(
+                block_spots.data(), block_strikes.data(),
+                block_rates.data(), block_dividends.data(),
+                block_vols.data(), block_times.data(),
+                block_results.data(), block_size
+            );
+        }
+        
+        // Convert results back to float and store
+        for (size_t i = 0; i < block_size; ++i) {
+            batch.results[block_start + i] = static_cast<float>(block_results[i]);
+        }
+    }
+    
+    return batch.results;
+}
+
+#ifdef __AVX512F__
+// NEW IMPLEMENTATION - Process using AVX-512 SIMD
+void ALOEngine::processAVX512Chunk(double S, const double* strikes, double r, double q,
+                                 double vol, double T, double* results, size_t size) const {
+    // Prepare constant parameters
+    __m512d S_vec = _mm512_set1_pd(S);
+    __m512d r_vec = _mm512_set1_pd(r);
+    __m512d q_vec = _mm512_set1_pd(q);
+    __m512d vol_vec = _mm512_set1_pd(vol);
+    __m512d T_vec = _mm512_set1_pd(T);
+    
+    // Process in chunks of 8 doubles (512 bits)
+    size_t i = 0;
+    for (; i + 7 < size; i += 8) {
+        // Load strikes
+        __m512d K_vec = _mm512_loadu_pd(strikes + i);
+        
+        // Calculate put prices
+        __m512d result = opt::SimdOpsAVX512::bsPut(S_vec, K_vec, r_vec, q_vec, vol_vec, T_vec);
+        
+        // Store results
+        _mm512_storeu_pd(results + i, result);
+    }
+    
+    // Handle remaining elements with AVX2
+    if (i < size) {
+        processSIMDChunk(S, strikes + i, r, q, vol, T, results + i, size - i);
+    }
+}
+#endif // __AVX512F__
   
 std::shared_ptr<ALOEngine::FixedPointEvaluator> ALOEngine::createFixedPointEvaluator(
     double K, double r, double q, double vol, 

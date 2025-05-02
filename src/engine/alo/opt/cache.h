@@ -387,6 +387,33 @@ inline FastPricingCache& getThreadLocalCache() {
 }
 
 /**
+ * @brief Structure of Arrays (SoA) layout for better SIMD efficiency
+ */
+struct OptionBatch {
+    std::vector<float> spots;
+    std::vector<float> strikes;
+    std::vector<float> rates;
+    std::vector<float> dividends;
+    std::vector<float> vols;
+    std::vector<float> times;
+    std::vector<float> results;
+    
+    void resize(size_t size) {
+        spots.resize(size);
+        strikes.resize(size);
+        rates.resize(size);
+        dividends.resize(size);
+        vols.resize(size);
+        times.resize(size);
+        results.resize(size);
+    }
+    
+    size_t size() const {
+        return spots.size();
+    }
+};
+
+/**
  * @brief Interface for cache implementation (legacy support)
  * 
  * @tparam K Key type

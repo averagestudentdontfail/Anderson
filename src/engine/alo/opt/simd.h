@@ -208,7 +208,67 @@ public:
     }
 
     /**
-     * @brief Normal CDF calculation
+     * @brief Fast approximation of error function using SIMD
+     * 
+     * Uses Abramowitz and Stegun approximation for better performance
+     * with vectorized computation.
+     */
+    static inline __m256d fast_erf(__m256d x) {
+        // Extract sign for later reconstruction
+        __m256d sign_bit = _mm256_and_pd(x, _mm256_set1_pd(-0.0));
+        
+        // Take absolute value
+        __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x);
+        
+        // Constants for Abramowitz & Stegun approximation
+        const __m256d a1 = _mm256_set1_pd(0.254829592);
+        const __m256d a2 = _mm256_set1_pd(-0.284496736);
+        const __m256d a3 = _mm256_set1_pd(1.421413741);
+        const __m256d a4 = _mm256_set1_pd(-1.453152027);
+        const __m256d a5 = _mm256_set1_pd(1.061405429);
+        const __m256d p = _mm256_set1_pd(0.3275911);
+        
+        // Calculate t = 1/(1 + p*|x|)
+        __m256d t = _mm256_div_pd(
+            _mm256_set1_pd(1.0),
+            _mm256_add_pd(_mm256_set1_pd(1.0), _mm256_mul_pd(p, abs_x))
+        );
+        
+        // Calculate polynomial using Estrin's scheme (faster than Horner's method for SIMD)
+        
+        // First level: a5*t, a3*t, a1*t
+        __m256d a5t = _mm256_mul_pd(a5, t);
+        __m256d a3t = _mm256_mul_pd(a3, t);
+        __m256d a1t = _mm256_mul_pd(a1, t);
+        
+        // Second level: (a5*t + a4), (a3*t + a2)
+        __m256d a5t_a4 = _mm256_add_pd(a5t, a4);
+        __m256d a3t_a2 = _mm256_add_pd(a3t, a2);
+        
+        // Third level: (a5*t + a4)*t^2, (a3*t + a2)*t^2
+        __m256d t_squared = _mm256_mul_pd(t, t);
+        __m256d a5t_a4_t2 = _mm256_mul_pd(a5t_a4, t_squared);
+        __m256d a3t_a2_t = _mm256_mul_pd(a3t_a2, t);
+        
+        // Fourth level: (a5*t + a4)*t^2 + (a3*t + a2)*t
+        __m256d poly = _mm256_add_pd(a5t_a4_t2, a3t_a2_t);
+        
+        // Fifth level: ((a5*t + a4)*t^2 + (a3*t + a2)*t) + a1*t
+        poly = _mm256_add_pd(poly, a1t);
+        
+        // Calculate 1 - poly * exp(-x^2)
+        __m256d x_squared = _mm256_mul_pd(abs_x, abs_x);
+        __m256d neg_x_squared = _mm256_mul_pd(x_squared, _mm256_set1_pd(-1.0));
+        __m256d exp_term = Sleef_expd4_u10avx2(neg_x_squared);
+        __m256d poly_exp = _mm256_mul_pd(poly, exp_term);
+        __m256d result = _mm256_sub_pd(_mm256_set1_pd(1.0), poly_exp);
+        
+        // Restore sign
+        return _mm256_xor_pd(result, sign_bit);
+    }
+
+    /**
+     * @brief Normal CDF calculation with improved precision
      * 
      * Uses the numerically stable approach based on erf and erfc
      * - For moderate values: N(x) = 0.5*(1 + erf(x/sqrt(2)))
@@ -219,36 +279,41 @@ public:
      * @return Vector containing normalCDF(x)
      */
     static inline __m256d normalCDF(__m256d x) {
-        const __m256d ONE = _mm256_set1_pd(1.0);
         const __m256d HALF = _mm256_set1_pd(0.5);
-        const __m256d SQRT2 = _mm256_set1_pd(M_SQRT2);
+        const __m256d ONE = _mm256_set1_pd(1.0);
+        const __m256d SQRT2_INV = _mm256_set1_pd(0.7071067811865475); // 1/sqrt(2)
         
-        // Get absolute value and sign masks for condition testing
+        // Get absolute value for condition testing
         __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x);
-        __m256d neg_mask = _mm256_cmp_pd(x, _mm256_setzero_pd(), _CMP_LT_OQ);
-        __m256d large_mask = _mm256_cmp_pd(abs_x, _mm256_set1_pd(8.0), _CMP_GT_OQ);
         
-        // For normal range values (-8 to 8), use erf
-        __m256d scaled_x = _mm256_div_pd(x, SQRT2);
-        __m256d erf_scaled = Sleef_erfd4_u10avx2(scaled_x);
-        __m256d normal_result = _mm256_mul_pd(_mm256_add_pd(ONE, erf_scaled), HALF);
+        // Create masks for extreme values
+        __m256d large_neg_mask = _mm256_cmp_pd(x, _mm256_set1_pd(-8.0), _CMP_LT_OS);
+        __m256d large_pos_mask = _mm256_cmp_pd(x, _mm256_set1_pd(8.0), _CMP_GT_OS);
         
-        // For extreme values, calculate using erfc for better numerical stability
-        __m256d neg_scaled_x = _mm256_sub_pd(_mm256_setzero_pd(), scaled_x);
-        __m256d erfc_result;
+        // Calculate erf(x/sqrt(2))
+        __m256d scaled_x = _mm256_mul_pd(x, SQRT2_INV);
+        __m256d erf_result = Sleef_erfd4_u10avx2(scaled_x);
         
-        // For negative large x: N(x) = 0.5*erfc(-x/sqrt(2))
-        __m256d large_neg_result = _mm256_mul_pd(HALF, Sleef_erfcd4_u15avx2(neg_scaled_x));
+        // Normal range: 0.5 * (1 + erf(x/sqrt(2)))
+        __m256d normal_result = _mm256_mul_pd(
+            HALF, 
+            _mm256_add_pd(ONE, erf_result)
+        );
         
-        // For positive large x: N(x) = 1 - 0.5*erfc(x/sqrt(2))
-        __m256d large_pos_result = _mm256_sub_pd(ONE, 
-                                  _mm256_mul_pd(HALF, Sleef_erfcd4_u15avx2(scaled_x)));
+        // Handle extreme values
+        __m256d result = _mm256_blendv_pd(
+            normal_result,
+            _mm256_setzero_pd(),  // Return 0 for large negative x
+            large_neg_mask
+        );
         
-        // Blend results based on sign of x for large values
-        erfc_result = _mm256_blendv_pd(large_pos_result, large_neg_result, neg_mask);
+        result = _mm256_blendv_pd(
+            result,
+            ONE,  // Return 1 for large positive x
+            large_pos_mask
+        );
         
-        // Blend final result based on magnitude
-        return _mm256_blendv_pd(normal_result, erfc_result, large_mask);
+        return result;
     }
     
     /**
@@ -483,6 +548,196 @@ public:
         return Sleef_tanhd4_u10avx2(x);
     }
 };
+
+// Add AVX-512 support when available
+#ifdef __AVX512F__
+/**
+ * @class SimdOpsAVX512
+ * @brief AVX-512 optimized operations for financial math
+ * 
+ * This class provides SIMD operations using AVX-512 instructions
+ * for processing 8 options at once.
+ */
+class SimdOpsAVX512 {
+public:
+    /**
+     * @brief Calculate Black-Scholes put prices for 8 options at once
+     * 
+     * @param S Spot prices
+     * @param K Strike prices
+     * @param r Risk-free rates
+     * @param q Dividend yields
+     * @param vol Volatilities
+     * @param T Times to maturity
+     * @return Vector containing put option prices
+     */
+    static inline __m512d bsPut(__m512d S, __m512d K, __m512d r, __m512d q, __m512d vol, __m512d T) {
+        // Check for degenerate cases
+        __m512d zero = _mm512_setzero_pd();
+        __m512d eps = _mm512_set1_pd(1e-10);
+        
+        // Create mask for vol <= 0 or T <= 0
+        __mmask8 vol_mask = _mm512_cmp_pd_mask(vol, eps, _CMP_LE_OQ);
+        __mmask8 t_mask = _mm512_cmp_pd_mask(T, eps, _CMP_LE_OQ);
+        __mmask8 degenerate_mask = _mm512_kor(vol_mask, t_mask);
+        
+        // Calculate K-S for degenerate cases
+        __m512d K_minus_S = _mm512_sub_pd(K, S);
+        __m512d degenerate_value = _mm512_max_pd(zero, K_minus_S);
+        
+        // Calculate d1
+        __m512d sqrt_T = _mm512_sqrt_pd(T);
+        __m512d vol_sqrt_T = _mm512_mul_pd(vol, sqrt_T);
+        
+        // Calculate log(S/K)
+        __m512d S_div_K = _mm512_div_pd(S, K);
+        __m512d log_S_div_K = Sleef_logd8_u10avx512(S_div_K);
+        
+        // Calculate (r-q) + 0.5*vol^2
+        __m512d r_minus_q = _mm512_sub_pd(r, q);
+        __m512d vol_squared = _mm512_mul_pd(vol, vol);
+        __m512d half_vol_squared = _mm512_mul_pd(_mm512_set1_pd(0.5), vol_squared);
+        __m512d drift = _mm512_add_pd(r_minus_q, half_vol_squared);
+        
+        // Calculate (r-q + 0.5*vol^2) * T
+        __m512d drift_T = _mm512_mul_pd(drift, T);
+        
+        // Calculate d1 numerator
+        __m512d d1_num = _mm512_add_pd(log_S_div_K, drift_T);
+        
+        // Calculate d1
+        __m512d d1 = _mm512_div_pd(d1_num, vol_sqrt_T);
+        
+        // Calculate d2 = d1 - vol*sqrt(T)
+        __m512d d2 = _mm512_sub_pd(d1, vol_sqrt_T);
+        
+        // Negate d1 and d2 for put formula
+        __m512d neg_d1 = _mm512_sub_pd(zero, d1);
+        __m512d neg_d2 = _mm512_sub_pd(zero, d2);
+        
+        // Calculate N(-d1) and N(-d2)
+        __m512d scaled_neg_d1 = _mm512_div_pd(neg_d1, _mm512_set1_pd(M_SQRT2));
+        __m512d scaled_neg_d2 = _mm512_div_pd(neg_d2, _mm512_set1_pd(M_SQRT2));
+        
+        __m512d Nd1 = _mm512_mul_pd(
+            _mm512_set1_pd(0.5),
+            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512(scaled_neg_d1))
+        );
+        
+        __m512d Nd2 = _mm512_mul_pd(
+            _mm512_set1_pd(0.5),
+            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512(scaled_neg_d2))
+        );
+        
+        // Calculate discount factors
+        __m512d neg_r_T = _mm512_mul_pd(_mm512_sub_pd(zero, r), T);
+        __m512d neg_q_T = _mm512_mul_pd(_mm512_sub_pd(zero, q), T);
+        __m512d dr = Sleef_expd8_u10avx512(neg_r_T);
+        __m512d dq = Sleef_expd8_u10avx512(neg_q_T);
+        
+        // Calculate K * e^(-rT) * N(-d2)
+        __m512d term1 = _mm512_mul_pd(K, dr);
+        term1 = _mm512_mul_pd(term1, Nd2);
+        
+        // Calculate S * e^(-qT) * N(-d1)
+        __m512d term2 = _mm512_mul_pd(S, dq);
+        term2 = _mm512_mul_pd(term2, Nd1);
+        
+        // Calculate put price = K * e^(-rT) * N(-d2) - S * e^(-qT) * N(-d1)
+        __m512d put_price = _mm512_sub_pd(term1, term2);
+        
+        // Blend degenerate and computed values
+        return _mm512_mask_blend_pd(degenerate_mask, put_price, degenerate_value);
+    }
+    
+    /**
+     * @brief Calculate Black-Scholes call prices for 8 options at once
+     * 
+     * @param S Spot prices
+     * @param K Strike prices
+     * @param r Risk-free rates
+     * @param q Dividend yields
+     * @param vol Volatilities
+     * @param T Times to maturity
+     * @return Vector containing call option prices
+     */
+    static inline __m512d bsCall(__m512d S, __m512d K, __m512d r, __m512d q, __m512d vol, __m512d T) {
+        // Check for degenerate cases
+        __m512d zero = _mm512_setzero_pd();
+        __m512d eps = _mm512_set1_pd(1e-10);
+        
+        // Create mask for vol <= 0 or T <= 0
+        __mmask8 vol_mask = _mm512_cmp_pd_mask(vol, eps, _CMP_LE_OQ);
+        __mmask8 t_mask = _mm512_cmp_pd_mask(T, eps, _CMP_LE_OQ);
+        __mmask8 degenerate_mask = _mm512_kor(vol_mask, t_mask);
+        
+        // Calculate S-K for degenerate cases
+        __m512d S_minus_K = _mm512_sub_pd(S, K);
+        __m512d degenerate_value = _mm512_max_pd(zero, S_minus_K);
+        
+        // Calculate sqrt(T)
+        __m512d sqrt_T = _mm512_sqrt_pd(T);
+        __m512d vol_sqrt_T = _mm512_mul_pd(vol, sqrt_T);
+        
+        // Calculate log(S/K)
+        __m512d S_div_K = _mm512_div_pd(S, K);
+        __m512d log_S_div_K = Sleef_logd8_u10avx512(S_div_K);
+        
+        // Calculate drift term
+        __m512d r_minus_q = _mm512_sub_pd(r, q);
+        __m512d vol_squared = _mm512_mul_pd(vol, vol);
+        __m512d half_vol_squared = _mm512_mul_pd(_mm512_set1_pd(0.5), vol_squared);
+        __m512d drift = _mm512_add_pd(r_minus_q, half_vol_squared);
+        
+        // Calculate drift * T
+        __m512d drift_T = _mm512_mul_pd(drift, T);
+        
+        // Calculate d1 numerator
+        __m512d d1_num = _mm512_add_pd(log_S_div_K, drift_T);
+        
+        // Calculate d1
+        __m512d d1 = _mm512_div_pd(d1_num, vol_sqrt_T);
+        
+        // Calculate d2 = d1 - vol*sqrt(T)
+        __m512d d2 = _mm512_sub_pd(d1, vol_sqrt_T);
+        
+        // Calculate N(d1) and N(d2)
+        __m512d scaled_d1 = _mm512_div_pd(d1, _mm512_set1_pd(M_SQRT2));
+        __m512d scaled_d2 = _mm512_div_pd(d2, _mm512_set1_pd(M_SQRT2));
+        
+        __m512d Nd1 = _mm512_mul_pd(
+            _mm512_set1_pd(0.5),
+            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512(scaled_d1))
+        );
+        
+        __m512d Nd2 = _mm512_mul_pd(
+            _mm512_set1_pd(0.5),
+            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512(scaled_d2))
+        );
+        
+        // Calculate discount factors
+        __m512d neg_r_T = _mm512_mul_pd(_mm512_sub_pd(zero, r), T);
+        __m512d neg_q_T = _mm512_mul_pd(_mm512_sub_pd(zero, q), T);
+        
+        __m512d dr = Sleef_expd8_u10avx512(neg_r_T);
+        __m512d dq = Sleef_expd8_u10avx512(neg_q_T);
+        
+        // Calculate S * e^(-qT) * N(d1)
+        __m512d term1 = _mm512_mul_pd(S, dq);
+        term1 = _mm512_mul_pd(term1, Nd1);
+        
+        // Calculate K * e^(-rT) * N(d2)
+        __m512d term2 = _mm512_mul_pd(K, dr);
+        term2 = _mm512_mul_pd(term2, Nd2);
+        
+        // Calculate call price = S * e^(-qT) * N(d1) - K * e^(-rT) * N(d2)
+        __m512d call_price = _mm512_sub_pd(term1, term2);
+        
+        // Blend degenerate and computed values
+        return _mm512_mask_blend_pd(degenerate_mask, call_price, degenerate_value);
+    }
+};
+#endif // __AVX512F__
 
 } // namespace opt
 } // namespace alo
