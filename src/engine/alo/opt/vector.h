@@ -1,16 +1,47 @@
 #ifndef ENGINE_ALO_OPT_VECTOR_H
 #define ENGINE_ALO_OPT_VECTOR_H
 
-#include "simd.h"
-#include <sleef.h>
 #include <immintrin.h>  
+#include <sleef.h>
 #include <array>
 #include <cmath>
 #include <algorithm>
+#include <vector>
 
 namespace engine {
 namespace alo {
 namespace opt {
+
+// Core SIMD vector types
+using SimdVec8f = __m256;   // 8 x float (32-bit)
+using SimdVec4d = __m256d;  // 4 x double (64-bit)
+    
+#ifdef __AVX512F__
+using SimdVec16f = __m512;  // 16 x float (32-bit)
+using SimdVec8d = __m512d;  // 8 x double (64-bit)
+#endif
+
+// SIMD feature detection
+enum SIMDSupport {
+    NONE = 0,
+    SSE2 = 1,
+    AVX = 2,
+    AVX2 = 3,
+    AVX512 = 4
+};
+
+// Function declaration for SIMD detection
+SIMDSupport detectSIMDSupport();
+
+// Structure for Black-Scholes Greeks
+struct BSGreeks {
+    double price;
+    double delta;
+    double gamma;
+    double vega;
+    double theta;
+    double rho;
+};
 
 /**
  * @brief Vectorized math operations for arrays of data
@@ -205,6 +236,22 @@ public:
      */
     static void bsD1D2(const double* S, const double* K, const double* r, const double* q, 
                       const double* vol, const double* T, double* d1, double* d2, size_t size);
+    
+    /**
+     * @brief Calculate d1 and d2 in a single fused operation for improved cache efficiency
+     *
+     * @param S Spot prices
+     * @param K Strike prices
+     * @param r Risk-free rates
+     * @param q Dividend yields
+     * @param vol Volatilities
+     * @param T Times to maturity
+     * @param d1 Output array for d1 values
+     * @param d2 Output array for d2 values
+     * @param size Number of options
+     */
+    static void calculateD1D2Fused(const double* S, const double* K, const double* r, const double* q, 
+                                 const double* vol, const double* T, double* d1, double* d2, size_t size);
 
     /**
      * @brief Fused operation for e^(-r*T) * N(x) - common in option pricing
@@ -217,6 +264,69 @@ public:
      */
     static void discountedNormal(const double* x, const double* r, const double* T, 
                                 double* result, size_t size);
+    
+    /**
+     * @brief Process batch with manual loop unrolling for better instruction-level parallelism
+     *
+     * @param S Spot price (constant)
+     * @param K Strike prices
+     * @param r Risk-free rate (constant)
+     * @param q Dividend yield (constant)
+     * @param vol Volatility (constant)
+     * @param T Time to maturity (constant)
+     * @param results Output array
+     * @param size Number of options
+     */
+    static void processUnrolledBatch(const double* S, const double* K, const double* r,
+                                   const double* q, const double* vol, const double* T,
+                                   double* results, size_t size);
+    
+    /**
+     * @brief Calculate Black-Scholes put prices with Greeks in a single pass
+     *
+     * @param S Spot prices
+     * @param K Strike prices
+     * @param r Risk-free rates
+     * @param q Dividend yields
+     * @param vol Volatilities
+     * @param T Times to maturity
+     * @param results Output array for option prices and Greeks
+     * @param size Number of options
+     */
+    static void bsPutWithGreeks(const double* S, const double* K, const double* r, const double* q, 
+                              const double* vol, const double* T, BSGreeks* results, size_t size);
+    
+    /**
+     * @brief SIMD-accelerated American put option approximation
+     *
+     * @param S Spot prices
+     * @param K Strike prices
+     * @param r Risk-free rates
+     * @param q Dividend yields
+     * @param vol Volatilities
+     * @param T Times to maturity
+     * @param results Output array
+     * @param size Number of options
+     */
+    static void americanPutApprox(const double* S, const double* K, const double* r,
+                                const double* q, const double* vol, const double* T,
+                                double* results, size_t size);
+
+    /**
+     * @brief Convert array of doubles to array of floats
+     *
+     * @param input Input array of doubles
+     * @return Vector of converted floats
+     */
+    static std::vector<float> convertToFloat(const std::vector<double>& input);
+
+    /**
+     * @brief Convert array of floats to array of doubles
+     *
+     * @param input Input array of floats
+     * @return Vector of converted doubles
+     */
+    static std::vector<double> convertToDouble(const std::vector<float>& input);
 };
 
 } // namespace opt
