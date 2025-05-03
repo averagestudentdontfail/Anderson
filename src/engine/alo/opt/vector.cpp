@@ -8,6 +8,22 @@
 #include <cstring> 
 #include <cstdint>
 
+// Platform-specific CPU detection
+#ifdef _WIN32
+    #include <intrin.h>
+    // Windows implementation uses __cpuid intrinsic
+    inline void get_cpuid(int level, int output[4]) {
+        __cpuid(output, level);
+    }
+#else
+    #include <cpuid.h>
+    // Linux/GCC implementation uses __get_cpuid intrinsic
+    inline void get_cpuid(int level, int output[4]) {
+        unsigned int* regs = reinterpret_cast<unsigned int*>(output);
+        __get_cpuid(level, &regs[0], &regs[1], &regs[2], &regs[3]);
+    }
+#endif
+
 namespace engine {
 namespace alo {
 namespace opt {
@@ -17,14 +33,14 @@ SIMDSupport detectSIMDSupport() {
     int info[4];
     
     // Check for SSE2
-    __cpuid(info, 1);
+    get_cpuid(1, info);
     if (!(info[3] & (1 << 26))) return NONE;
     
     // Check for AVX
     if (!(info[2] & (1 << 28))) return SSE2;
     
     // Check for AVX2
-    __cpuid(info, 7);
+    get_cpuid(7, info);
     if (!(info[1] & (1 << 5))) return AVX;
     
     // Check for AVX-512F
@@ -175,9 +191,6 @@ void VectorMath::normalCDF(const double* x, double* result, size_t size) {
     size_t i = 0;
     for (; i + 3 < size; i += 4) {
         __m256d x_vec = _mm256_loadu_pd(x + i);
-        
-        // Get absolute value and sign masks for condition testing
-        __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x_vec);
         
         // Create masks for extreme values
         __m256d large_neg_mask = _mm256_cmp_pd(x_vec, _mm256_set1_pd(-8.0), _CMP_LT_OS);
@@ -711,7 +724,6 @@ void VectorMath::expMultSqrt(const double* x, const double* y, double* result, s
     // Process larger chunks if SIMD is available
     constexpr size_t SIMD_THRESHOLD = 32;
     constexpr size_t CACHE_LINE_SIZE = 64; // Bytes, typical L1 cache line
-    constexpr size_t DOUBLES_PER_CACHE_LINE = CACHE_LINE_SIZE / sizeof(double);
     
     // Use scalar operations for small data sizes
     if (size < SIMD_THRESHOLD) {
