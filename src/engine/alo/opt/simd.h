@@ -283,9 +283,6 @@ public:
         const __m256d ONE = _mm256_set1_pd(1.0);
         const __m256d SQRT2_INV = _mm256_set1_pd(0.7071067811865475); // 1/sqrt(2)
         
-        // Get absolute value for condition testing
-        __m256d abs_x = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x);
-        
         // Create masks for extreme values
         __m256d large_neg_mask = _mm256_cmp_pd(x, _mm256_set1_pd(-8.0), _CMP_LT_OS);
         __m256d large_pos_mask = _mm256_cmp_pd(x, _mm256_set1_pd(8.0), _CMP_GT_OS);
@@ -591,7 +588,7 @@ public:
         
         // Calculate log(S/K)
         __m512d S_div_K = _mm512_div_pd(S, K);
-        __m512d log_S_div_K = Sleef_logd8_u10avx512(S_div_K);
+        __m512d log_S_div_K = Sleef_logd8_u10avx512f(S_div_K);
         
         // Calculate (r-q) + 0.5*vol^2
         __m512d r_minus_q = _mm512_sub_pd(r, q);
@@ -621,19 +618,19 @@ public:
         
         __m512d Nd1 = _mm512_mul_pd(
             _mm512_set1_pd(0.5),
-            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512(scaled_neg_d1))
+            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512f(scaled_neg_d1))
         );
         
         __m512d Nd2 = _mm512_mul_pd(
             _mm512_set1_pd(0.5),
-            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512(scaled_neg_d2))
+            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512f(scaled_neg_d2))
         );
         
         // Calculate discount factors
         __m512d neg_r_T = _mm512_mul_pd(_mm512_sub_pd(zero, r), T);
         __m512d neg_q_T = _mm512_mul_pd(_mm512_sub_pd(zero, q), T);
-        __m512d dr = Sleef_expd8_u10avx512(neg_r_T);
-        __m512d dq = Sleef_expd8_u10avx512(neg_q_T);
+        __m512d dr = Sleef_expd8_u10avx512f(neg_r_T);
+        __m512d dq = Sleef_expd8_u10avx512f(neg_q_T);
         
         // Calculate K * e^(-rT) * N(-d2)
         __m512d term1 = _mm512_mul_pd(K, dr);
@@ -681,7 +678,7 @@ public:
         
         // Calculate log(S/K)
         __m512d S_div_K = _mm512_div_pd(S, K);
-        __m512d log_S_div_K = Sleef_logd8_u10avx512(S_div_K);
+        __m512d log_S_div_K = Sleef_logd8_u10avx512f(S_div_K);
         
         // Calculate drift term
         __m512d r_minus_q = _mm512_sub_pd(r, q);
@@ -707,20 +704,20 @@ public:
         
         __m512d Nd1 = _mm512_mul_pd(
             _mm512_set1_pd(0.5),
-            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512(scaled_d1))
+            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512f(scaled_d1))
         );
         
         __m512d Nd2 = _mm512_mul_pd(
             _mm512_set1_pd(0.5),
-            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512(scaled_d2))
+            _mm512_add_pd(_mm512_set1_pd(1.0), Sleef_erfd8_u10avx512f(scaled_d2))
         );
         
         // Calculate discount factors
         __m512d neg_r_T = _mm512_mul_pd(_mm512_sub_pd(zero, r), T);
         __m512d neg_q_T = _mm512_mul_pd(_mm512_sub_pd(zero, q), T);
         
-        __m512d dr = Sleef_expd8_u10avx512(neg_r_T);
-        __m512d dq = Sleef_expd8_u10avx512(neg_q_T);
+        __m512d dr = Sleef_expd8_u10avx512f(neg_r_T);
+        __m512d dq = Sleef_expd8_u10avx512f(neg_q_T);
         
         // Calculate S * e^(-qT) * N(d1)
         __m512d term1 = _mm512_mul_pd(S, dq);

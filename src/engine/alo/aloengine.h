@@ -4,6 +4,7 @@
 #include "aloscheme.h"
 #include "alodistribute.h"
 #include <immintrin.h>
+#include <sleef.h> 
 #include <memory>
 #include <functional>
 #include <string>
