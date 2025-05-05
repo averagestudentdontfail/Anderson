@@ -34,7 +34,7 @@ public:
 private:
     std::chrono::time_point<std::chrono::high_resolution_clock> start_;
 };
- 
+
 /**
  * @brief Run a simple pricing test
  */
@@ -87,47 +87,101 @@ void runSimplePricingTest() {
     std::cout << "  American Call:      " << americanCall << "\n";
     std::cout << "  Call Premium:       " << callPremium << "\n";
 }
- 
+
 /**
- * @brief Run a batch pricing test
+ * @brief Run a single-precision pricing test
  */
-void runBatchPricingTest() {
-    std::cout << "\n=== Batch Pricing Test ===\n";
+void runSinglePrecisionTest() {
+    std::cout << "\n=== Single-Precision Pricing Test ===\n";
     
     // Create ALO engine
     ALOEngine engine(ACCURATE);
     
     // Option parameters
     double S = 100.0;
+    double K = 100.0;
     double r = 0.05;
     double q = 0.02;
     double vol = 0.2;
     double T = 1.0;
     
+    // Price options with double precision
+    double europeanPutDouble = ALOEngine::blackScholesPut(S, K, r, q, vol, T);
+    double europeanCallDouble = ALOEngine::blackScholesCall(S, K, r, q, vol, T);
+    double americanPutDouble = engine.calculateOption(S, K, r, q, vol, T, PUT);
+    double americanCallDouble = engine.calculateOption(S, K, r, q, vol, T, CALL);
+    
+    // Price options with single precision
+    float europeanPutSingle = engine.calculateEuropeanSingle(S, K, r, q, vol, T, 0);
+    float europeanCallSingle = engine.calculateEuropeanSingle(S, K, r, q, vol, T, 1);
+    float americanPutSingle = engine.calculateAmericanSingle(S, K, r, q, vol, T, 0);
+    float americanCallSingle = engine.calculateAmericanSingle(S, K, r, q, vol, T, 1);
+    
+    // Print results
+    std::cout << std::fixed << std::setprecision(6);
+    std::cout << "Option Parameters:\n";
+    std::cout << "  Spot Price:         " << S << "\n";
+    std::cout << "  Strike Price:       " << K << "\n";
+    std::cout << "  Risk-Free Rate:     " << r << "\n";
+    std::cout << "  Dividend Yield:     " << q << "\n";
+    std::cout << "  Volatility:         " << vol << "\n";
+    std::cout << "  Time to Maturity:   " << T << " year\n\n";
+    
+    std::cout << "Double vs Single Precision Comparison:\n";
+    std::cout << "                    Double       Single      Diff        Rel Diff\n";
+    std::cout << "  European Put:   " << std::setw(10) << europeanPutDouble 
+              << "   " << std::setw(10) << europeanPutSingle 
+              << "   " << std::setw(10) << std::abs(europeanPutDouble - europeanPutSingle) 
+              << "   " << std::setw(10) << std::abs(europeanPutDouble - europeanPutSingle)/europeanPutDouble << "\n";
+    
+    std::cout << "  European Call:  " << std::setw(10) << europeanCallDouble 
+              << "   " << std::setw(10) << europeanCallSingle 
+              << "   " << std::setw(10) << std::abs(europeanCallDouble - europeanCallSingle) 
+              << "   " << std::setw(10) << std::abs(europeanCallDouble - europeanCallSingle)/europeanCallDouble << "\n";
+    
+    std::cout << "  American Put:   " << std::setw(10) << americanPutDouble 
+              << "   " << std::setw(10) << americanPutSingle 
+              << "   " << std::setw(10) << std::abs(americanPutDouble - americanPutSingle) 
+              << "   " << std::setw(10) << std::abs(americanPutDouble - americanPutSingle)/americanPutDouble << "\n";
+    
+    std::cout << "  American Call:  " << std::setw(10) << americanCallDouble 
+              << "   " << std::setw(10) << americanCallSingle 
+              << "   " << std::setw(10) << std::abs(americanCallDouble - americanCallSingle) 
+              << "   " << std::setw(10) << std::abs(americanCallDouble - americanCallSingle)/americanCallDouble << "\n";
+}
+
+/**
+ * @brief Run a batch pricing test for single precision
+ */
+void runBatchSinglePrecisionTest() {
+    std::cout << "\n=== Batch Single-Precision Test ===\n";
+    
+    // Create ALO engine
+    ALOEngine engine(ACCURATE);
+    
+    // Option parameters
+    float S = 100.0f;
+    float r = 0.05f;
+    float q = 0.02f;
+    float vol = 0.2f;
+    float T = 1.0f;
+    
     // Create a range of strikes
-    std::vector<double> strikes;
-    for (double K = 80.0; K <= 120.0; K += 5.0) {
+    std::vector<float> strikes;
+    for (float K = 80.0f; K <= 120.0f; K += 5.0f) {
         strikes.push_back(K);
     }
     
-    // Batch price American puts
+    // Batch price puts with single precision
     Timer timer;
-    auto putPrices = engine.batchCalculatePut(S, strikes, r, q, vol, T);
-    double batchTime = timer.elapsed();
+    auto putPricesSingle = engine.batchCalculatePutSingle(S, strikes, r, q, vol, T);
+    double singleTime = timer.elapsed();
     
-    // Individual pricing for comparison
+    // Batch price puts with double precision
     timer.reset();
-    std::vector<double> individualPrices;
-    for (double K : strikes) {
-        individualPrices.push_back(engine.calculateOption(S, K, r, q, vol, T, PUT));
-    }
-    double individualTime = timer.elapsed();
-    
-    // Compute European prices for comparison
-    std::vector<double> europeanPrices;
-    for (double K : strikes) {
-        europeanPrices.push_back(ALOEngine::blackScholesPut(S, K, r, q, vol, T));
-    }
+    std::vector<double> strikesDouble(strikes.begin(), strikes.end());
+    auto putPricesDouble = engine.batchCalculatePut(S, strikesDouble, r, q, vol, T);
+    double doubleTime = timer.elapsed();
     
     // Print results
     std::cout << std::fixed << std::setprecision(6);
@@ -138,207 +192,55 @@ void runBatchPricingTest() {
     std::cout << "  Volatility:         " << vol << "\n";
     std::cout << "  Time to Maturity:   " << T << " year\n\n";
     
-    std::cout << "Pricing Results:\n";
-    std::cout << "Strike   European Put   American Put   Premium\n";
-    std::cout << "------   ------------   ------------   -------\n";
+    std::cout << "Double vs Single Precision Results:\n";
+    std::cout << "Strike   Double Prec.   Single Prec.   Diff       Rel Diff\n";
+    std::cout << "------   ------------   ------------   --------   --------\n";
+    
+    double maxDiff = 0.0;
+    double maxRelDiff = 0.0;
     
     for (size_t i = 0; i < strikes.size(); ++i) {
-        double premium = putPrices[i] - europeanPrices[i];
+        double diff = std::abs(putPricesDouble[i] - putPricesSingle[i]);
+        double relDiff = diff / putPricesDouble[i];
+        
+        maxDiff = std::max(maxDiff, diff);
+        maxRelDiff = std::max(maxRelDiff, relDiff);
+        
         std::cout << std::setw(6) << strikes[i] << "   "
-                  << std::setw(12) << europeanPrices[i] << "   "
-                  << std::setw(12) << putPrices[i] << "   "
-                  << std::setw(7) << premium << "\n";
+                  << std::setw(12) << putPricesDouble[i] << "   "
+                  << std::setw(12) << putPricesSingle[i] << "   "
+                  << std::setw(8) << diff << "   "
+                  << std::setw(8) << relDiff << "\n";
     }
+    
+    std::cout << "\nSummary:\n";
+    std::cout << "  Maximum Absolute Difference: " << maxDiff << "\n";
+    std::cout << "  Maximum Relative Difference: " << maxRelDiff << "\n";
     
     std::cout << "\nPerformance:\n";
-    std::cout << "  Batch Pricing Time:      " << batchTime << " ms\n";
-    std::cout << "  Individual Pricing Time: " << individualTime / strikes.size() << " ms per option\n";
-    std::cout << "  Speedup:                 " << (individualTime / strikes.size()) / (batchTime / strikes.size()) << "x\n";
+    std::cout << "  Double-Precision Batch Time: " << doubleTime << " ms\n";
+    std::cout << "  Single-Precision Batch Time: " << singleTime << " ms\n";
+    std::cout << "  Speedup:                     " << doubleTime / singleTime << "x\n";
 }
- 
+
 /**
- * @brief Run a parallel pricing test
+ * @brief Run a performance benchmark comparing double and single precision
  */
-void runParallelPricingTest() {
-    std::cout << "\n=== Parallel Pricing Test ===\n";
+void runPerformanceBenchmark() {
+    std::cout << "\n=== Performance Benchmark ===\n";
     
-    // Create ALO engine
+    // Create engine
     ALOEngine engine(ACCURATE);
     
-    // Option parameters
-    double S = 100.0;
-    double r = 0.05;
-    double q = 0.02;
-    double vol = 0.2;
-    double T = 1.0;
+    // Number of options to price
+    int numOptions = 1000000;
     
-    // Create a large range of strikes
-    std::vector<double> strikes;
-    for (double K = 50.0; K <= 150.0; K += 0.5) {
-        strikes.push_back(K);
-    }
+    std::cout << "Running performance benchmark with " << numOptions << " options...\n";
     
-    // Sequential pricing
-    Timer timer;
-    auto seqPrices = engine.batchCalculatePut(S, strikes, r, q, vol, T);
-    double seqTime = timer.elapsed();
-    
-    // Parallel pricing
-    timer.reset();
-    auto parPrices = engine.parallelBatchCalculatePut(S, strikes, r, q, vol, T);
-    double parTime = timer.elapsed();
-    
-    // Verify results
-    bool resultsMatch = true;
-    double maxDiff = 0.0;
-    for (size_t i = 0; i < strikes.size(); ++i) {
-        double diff = std::abs(seqPrices[i] - parPrices[i]);
-        maxDiff = std::max(maxDiff, diff);
-        if (diff > 1e-10) {
-            resultsMatch = false;
-        }
-    }
-    
-    // Print performance results
-    std::cout << std::fixed << std::setprecision(6);
-    std::cout << "Performance for " << strikes.size() << " options:\n";
-    std::cout << "  Sequential Time:  " << seqTime << " ms\n";
-    std::cout << "  Parallel Time:    " << parTime << " ms\n";
-    std::cout << "  Speedup:          " << seqTime / parTime << "x\n";
-    std::cout << "  Results Match:    " << (resultsMatch ? "Yes" : "No") << "\n";
-    std::cout << "  Maximum Difference: " << maxDiff << "\n";
+    // Run the built-in benchmark
+    engine.runBenchmark(numOptions);
 }
- 
-/**
- * @brief Run a SIMD optimization test with improved implementation
- */
- void runSimdOptimizationTest() {
-    std::cout << "\n=== SIMD Optimization Test ===\n";
-    
-    // Create test data
-    constexpr size_t dataSize = 1000000;
-    std::vector<double> x(dataSize);
-    std::vector<double> y(dataSize);
-    std::vector<double> z1(dataSize);
-    std::vector<double> z2(dataSize);
-    
-    // Initialize with some values
-    for (size_t i = 0; i < dataSize; ++i) {
-        // Use more reasonable values that avoid numerical overflow
-        x[i] = -5.0 + 10.0 * static_cast<double>(i) / dataSize;  // Range from -5 to 5
-        y[i] = 0.1 + 10.0 * static_cast<double>(i) / dataSize;   // Range from 0.1 to 10.1
-    }
-    
-    // Test vector operations (standard)
-    Timer timer;
-    for (size_t i = 0; i < dataSize; ++i) {
-        z1[i] = std::exp(x[i]) * std::sqrt(y[i]);
-    }
-    double standardTime = timer.elapsed();
-    
-    // Test vector operations (SIMD with fused operation)
-    timer.reset();
-    opt::VectorMath::expMultSqrt(x.data(), y.data(), z2.data(), dataSize);
-    double simdTime = timer.elapsed();
-    
-    // Verify results
-    double maxAbsDiff = 0.0;
-    double maxRelDiff = 0.0;
-    double sumStd = 0.0;
-    double sumSimd = 0.0;
-    
-    for (size_t i = 0; i < dataSize; ++i) {
-        double absDiff = std::abs(z1[i] - z2[i]);
-        maxAbsDiff = std::max(maxAbsDiff, absDiff);
-        
-        // Calculate relative difference (avoid division by zero)
-        if (std::abs(z1[i]) > 1e-10) {
-            double relDiff = absDiff / std::abs(z1[i]);
-            maxRelDiff = std::max(maxRelDiff, relDiff);
-        }
-        
-        sumStd += z1[i];
-        sumSimd += z2[i];
-    }
-    
-    // Print performance results
-    std::cout << std::fixed << std::setprecision(6);
-    std::cout << "Performance for " << dataSize << " operations:\n";
-    std::cout << "  Standard Time:      " << standardTime << " ms\n";
-    std::cout << "  SIMD Time:          " << simdTime << " ms\n";
-    std::cout << "  Speedup:            " << standardTime / simdTime << "x\n";
-    std::cout << "  Maximum Abs Diff:   " << std::scientific << maxAbsDiff << "\n";
-    std::cout << "  Maximum Rel Diff:   " << maxRelDiff << "\n";
-    std::cout << "  Standard Sum:       " << std::fixed << sumStd << "\n";
-    std::cout << "  SIMD Sum:           " << sumSimd << "\n";
-    
-    // Print some sample values for verification
-    std::cout << "\nSample values (first 5 elements):\n";
-    std::cout << "   x       y     Standard     SIMD       Diff\n";
-    std::cout << "------  ------  ----------  ----------  ------\n";
-    
-    for (size_t i = 0; i < 5; ++i) {
-        std::cout << std::fixed << std::setprecision(4);
-        std::cout << std::setw(6) << x[i] << "  " 
-                  << std::setw(6) << y[i] << "  "
-                  << std::setw(10) << z1[i] << "  "
-                  << std::setw(10) << z2[i] << "  "
-                  << std::scientific << std::setprecision(2) 
-                  << std::abs(z1[i] - z2[i]) << "\n";
-    }
-}
- 
-/**
- * @brief Run a cache optimization test
- */
-void runCacheOptimizationTest() {
-    std::cout << "\n=== Cache Optimization Test ===\n";
-    
-    // Create ALO engines
-    ALOEngine engineNoCache(ACCURATE);
-    ALOEngine engineWithCache(ACCURATE);
-    
-    // Clear cache in the second engine
-    engineWithCache.clearCache();
-    
-    // Option parameters
-    double S = 100.0;
-    double K = 100.0;
-    double r = 0.05;
-    double q = 0.02;
-    double vol = 0.2;
-    double T = 1.0;
-    
-    // First pricing to warm up both engines
-    engineNoCache.calculateOption(S, K, r, q, vol, T, PUT);
-    engineWithCache.calculateOption(S, K, r, q, vol, T, PUT);
-    
-    // Test without cache (repeat pricing 1000 times)
-    Timer timer;
-    double resultNoCache = 0.0;
-    for (int i = 0; i < 1000; ++i) {
-        resultNoCache = engineNoCache.calculateOption(S, K, r, q, vol, T, PUT);
-    }
-    double timeNoCache = timer.elapsed();
-    
-    // Test with cache (repeat pricing 1000 times)
-    timer.reset();
-    double resultWithCache = 0.0;
-    for (int i = 0; i < 1000; ++i) {
-        resultWithCache = engineWithCache.calculateOption(S, K, r, q, vol, T, PUT);
-    }
-    double timeWithCache = timer.elapsed();
-    
-    // Print performance results
-    std::cout << std::fixed << std::setprecision(6);
-    std::cout << "Performance for 1000 repeated pricings:\n";
-    std::cout << "  Time without Cache: " << timeNoCache << " ms\n";
-    std::cout << "  Time with Cache:    " << timeWithCache << " ms\n";
-    std::cout << "  Speedup:            " << timeNoCache / timeWithCache << "x\n";
-    std::cout << "  Results Match:      " << (std::abs(resultNoCache - resultWithCache) < 1e-10 ? "Yes" : "No") << "\n";
-    std::cout << "  Cache Size:         " << engineWithCache.getCacheSize() << " entries\n";
-}
- 
+
 /**
  * @brief Main function
  */
@@ -348,10 +250,9 @@ int main() {
     try {
         // Run various tests
         runSimplePricingTest();
-        runBatchPricingTest();
-        runParallelPricingTest();
-        runSimdOptimizationTest();
-        runCacheOptimizationTest();
+        runSinglePrecisionTest();
+        runBatchSinglePrecisionTest();
+        runPerformanceBenchmark();
         
         std::cout << "\nAll tests completed successfully.\n";
         return 0;

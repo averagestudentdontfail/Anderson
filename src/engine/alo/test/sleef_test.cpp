@@ -7,6 +7,7 @@
 #include <sleef.h>
 #include "../opt/simd.h"
 #include "../opt/vector.h"
+#include "../num/float.h"
 
 using namespace engine::alo::opt;
 
@@ -23,7 +24,7 @@ public:
     }
     
     void reset() {
-        start_ = std::chrono::high_resolution_clock::now();
+        start_ = std::chrono::time_point<std::chrono::high_resolution_clock>::now();
     }
     
 private:
@@ -31,141 +32,187 @@ private:
 };
 
 /**
- * Test each SLEEF-powered function against its standard math library equivalent
+ * Test single-precision optimized functions
  */
-void test_sleef_functions() {
+void test_single_precision_functions() {
     constexpr size_t TEST_SIZE = 1000000;
-    std::cout << "\n=== SLEEF Integration Test ===\n";
+    std::cout << "\n=== Single-Precision Function Test ===\n";
     
     // Create test data
-    std::vector<double> x(TEST_SIZE);
+    std::vector<float> x(TEST_SIZE);
     for (size_t i = 0; i < TEST_SIZE; ++i) {
         // Generate values between -10 and 10
-        x[i] = 20.0 * (static_cast<double>(i) / TEST_SIZE - 0.5);
+        x[i] = 20.0f * (static_cast<float>(i) / TEST_SIZE - 0.5f);
     }
     
-    // Test exponential function
+    // Clamp extreme values
+    for (auto& val : x) {
+        val = std::min(std::max(val, -10.0f), 10.0f);
+    }
+    
+    // Test error function
     {
-        std::vector<double> result_std(TEST_SIZE);
-        std::vector<double> result_sleef(TEST_SIZE);
+        std::vector<float> result_std(TEST_SIZE);
+        std::vector<float> result_fast(TEST_SIZE);
         
         // Standard implementation
         Timer timer;
         for (size_t i = 0; i < TEST_SIZE; ++i) {
-            // Clamp extreme values to avoid overflow
-            double val = std::min(std::max(x[i], -700.0), 700.0);
-            result_std[i] = std::exp(val);
+            result_std[i] = std::erf(x[i]);
         }
         double std_time = timer.elapsed();
         
-        // SLEEF implementation
+        // Fast implementation
         timer.reset();
-        VectorMath::exp(x.data(), result_sleef.data(), TEST_SIZE);
-        double sleef_time = timer.elapsed();
+        for (size_t i = 0; i < TEST_SIZE; ++i) {
+            result_fast[i] = engine::alo::num::fast_erf(x[i]);
+        }
+        double fast_time = timer.elapsed();
         
         // Calculate maximum difference
         double max_diff = 0.0;
         double max_rel_diff = 0.0;
         for (size_t i = 0; i < TEST_SIZE; ++i) {
-            double diff = std::abs(result_std[i] - result_sleef[i]);
+            double diff = std::abs(result_std[i] - result_fast[i]);
             max_diff = std::max(max_diff, diff);
             
-            if (result_std[i] != 0.0) {
+            if (std::abs(result_std[i]) > 1e-6f) {
                 double rel_diff = diff / std::abs(result_std[i]);
                 max_rel_diff = std::max(max_rel_diff, rel_diff);
             }
         }
         
-        std::cout << "Exponential function (exp):\n";
+        std::cout << "Error function (erf):\n";
         std::cout << "  Standard time:  " << std_time << " ms\n";
-        std::cout << "  SLEEF time:     " << sleef_time << " ms\n";
-        std::cout << "  Speedup:        " << std_time / sleef_time << "x\n";
+        std::cout << "  Fast time:      " << fast_time << " ms\n";
+        std::cout << "  Speedup:        " << std_time / fast_time << "x\n";
         std::cout << "  Max abs diff:   " << std::scientific << max_diff << "\n";
         std::cout << "  Max rel diff:   " << std::scientific << max_rel_diff << "\n\n";
     }
     
-    // Test logarithm function
+    // Test normal CDF
     {
-        std::vector<double> x_pos(TEST_SIZE);
-        for (size_t i = 0; i < TEST_SIZE; ++i) {
-            // Generate positive values
-            x_pos[i] = 0.0001 + 10.0 * static_cast<double>(i) / TEST_SIZE;
-        }
-        
-        std::vector<double> result_std(TEST_SIZE);
-        std::vector<double> result_sleef(TEST_SIZE);
+        std::vector<float> result_std(TEST_SIZE);
+        std::vector<float> result_fast(TEST_SIZE);
         
         // Standard implementation
         Timer timer;
         for (size_t i = 0; i < TEST_SIZE; ++i) {
-            result_std[i] = std::log(x_pos[i]);
+            result_std[i] = 0.5f * (1.0f + std::erf(x[i] / std::sqrt(2.0f)));
         }
         double std_time = timer.elapsed();
         
-        // SLEEF implementation
+        // Fast implementation
         timer.reset();
-        VectorMath::log(x_pos.data(), result_sleef.data(), TEST_SIZE);
-        double sleef_time = timer.elapsed();
+        for (size_t i = 0; i < TEST_SIZE; ++i) {
+            result_fast[i] = engine::alo::num::fast_normal_cdf(x[i]);
+        }
+        double fast_time = timer.elapsed();
         
         // Calculate maximum difference
         double max_diff = 0.0;
         double max_rel_diff = 0.0;
         for (size_t i = 0; i < TEST_SIZE; ++i) {
-            double diff = std::abs(result_std[i] - result_sleef[i]);
+            double diff = std::abs(result_std[i] - result_fast[i]);
             max_diff = std::max(max_diff, diff);
             
-            if (result_std[i] != 0.0) {
+            if (std::abs(result_std[i]) > 1e-6f) {
                 double rel_diff = diff / std::abs(result_std[i]);
                 max_rel_diff = std::max(max_rel_diff, rel_diff);
             }
         }
         
-        std::cout << "Logarithm function (log):\n";
+        std::cout << "Normal CDF function:\n";
         std::cout << "  Standard time:  " << std_time << " ms\n";
-        std::cout << "  SLEEF time:     " << sleef_time << " ms\n";
-        std::cout << "  Speedup:        " << std_time / sleef_time << "x\n";
+        std::cout << "  Fast time:      " << fast_time << " ms\n";
+        std::cout << "  Speedup:        " << std_time / fast_time << "x\n";
         std::cout << "  Max abs diff:   " << std::scientific << max_diff << "\n";
         std::cout << "  Max rel diff:   " << std::scientific << max_rel_diff << "\n\n";
     }
     
-    // Test Black-Scholes Put pricing
+    // Test SIMD normal CDF (AVX2, 8-wide)
+    {
+        constexpr size_t VECTOR_SIZE = 8;
+        const size_t aligned_size = (TEST_SIZE / VECTOR_SIZE) * VECTOR_SIZE;
+        
+        std::vector<float> result_std(aligned_size);
+        std::vector<float> result_simd(aligned_size);
+        
+        // Standard implementation
+        Timer timer;
+        for (size_t i = 0; i < aligned_size; ++i) {
+            result_std[i] = 0.5f * (1.0f + std::erf(x[i] / std::sqrt(2.0f)));
+        }
+        double std_time = timer.elapsed();
+        
+        // SIMD implementation (manually handling 8 values at a time)
+        timer.reset();
+        for (size_t i = 0; i < aligned_size; i += VECTOR_SIZE) {
+            __m256 x_vec = _mm256_loadu_ps(&x[i]);
+            __m256 result_vec = engine::alo::num::simd::normal_cdf_ps(x_vec);
+            _mm256_storeu_ps(&result_simd[i], result_vec);
+        }
+        double simd_time = timer.elapsed();
+        
+        // Calculate maximum difference
+        double max_diff = 0.0;
+        double max_rel_diff = 0.0;
+        for (size_t i = 0; i < aligned_size; ++i) {
+            double diff = std::abs(result_std[i] - result_simd[i]);
+            max_diff = std::max(max_diff, diff);
+            
+            if (std::abs(result_std[i]) > 1e-6f) {
+                double rel_diff = diff / std::abs(result_std[i]);
+                max_rel_diff = std::max(max_rel_diff, rel_diff);
+            }
+        }
+        
+        std::cout << "SIMD Normal CDF (8-wide):\n";
+        std::cout << "  Standard time:  " << std_time << " ms\n";
+        std::cout << "  SIMD time:      " << simd_time << " ms\n";
+        std::cout << "  Speedup:        " << std_time / simd_time << "x\n";
+        std::cout << "  Max abs diff:   " << std::scientific << max_diff << "\n";
+        std::cout << "  Max rel diff:   " << std::scientific << max_rel_diff << "\n\n";
+    }
+    
+    // Test single-precision European Put pricing
     {
         constexpr size_t BS_TEST_SIZE = 100000;
         
-        // Generate random option parameters
-        std::vector<double> S(BS_TEST_SIZE, 100.0);
-        std::vector<double> K(BS_TEST_SIZE);
-        std::vector<double> r(BS_TEST_SIZE, 0.05);
-        std::vector<double> q(BS_TEST_SIZE, 0.02);
-        std::vector<double> vol(BS_TEST_SIZE, 0.2);
-        std::vector<double> T(BS_TEST_SIZE, 1.0);
+        // Generate option parameters
+        std::vector<float> S(BS_TEST_SIZE, 100.0f);
+        std::vector<float> K(BS_TEST_SIZE);
+        std::vector<float> r(BS_TEST_SIZE, 0.05f);
+        std::vector<float> q(BS_TEST_SIZE, 0.02f);
+        std::vector<float> vol(BS_TEST_SIZE, 0.2f);
+        std::vector<float> T(BS_TEST_SIZE, 1.0f);
         
         // Vary strike prices
         for (size_t i = 0; i < BS_TEST_SIZE; ++i) {
-            K[i] = 50.0 + 100.0 * static_cast<double>(i) / BS_TEST_SIZE;
+            K[i] = 50.0f + 100.0f * static_cast<float>(i) / BS_TEST_SIZE;
         }
         
-        std::vector<double> result_std(BS_TEST_SIZE);
-        std::vector<double> result_sleef(BS_TEST_SIZE);
+        std::vector<float> result_std(BS_TEST_SIZE);
+        std::vector<float> result_simd(BS_TEST_SIZE);
         
         // Standard implementation
         Timer timer;
         for (size_t i = 0; i < BS_TEST_SIZE; ++i) {
-            double d1 = (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) 
-                      / (vol[i] * std::sqrt(T[i]));
-            double d2 = d1 - vol[i] * std::sqrt(T[i]);
+            float d1 = (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5f * vol[i] * vol[i]) * T[i]) 
+                     / (vol[i] * std::sqrt(T[i]));
+            float d2 = d1 - vol[i] * std::sqrt(T[i]);
             
-            double nd1 = 0.5 * (1.0 + std::erf(-d1 / std::sqrt(2.0)));
-            double nd2 = 0.5 * (1.0 + std::erf(-d2 / std::sqrt(2.0)));
+            float nd1 = 0.5f * (1.0f + engine::alo::num::fast_erf(-d1 / std::sqrt(2.0f)));
+            float nd2 = 0.5f * (1.0f + engine::alo::num::fast_erf(-d2 / std::sqrt(2.0f)));
             
             result_std[i] = K[i] * std::exp(-r[i] * T[i]) * nd2 - S[i] * std::exp(-q[i] * T[i]) * nd1;
         }
         double std_time = timer.elapsed();
         
-        // SLEEF implementation
+        // SIMD implementation
         timer.reset();
-        VectorMath::bsPut(S.data(), K.data(), r.data(), q.data(), vol.data(), T.data(), result_sleef.data(), BS_TEST_SIZE);
-        double sleef_time = timer.elapsed();
+        VectorSingle::EuropeanPut(S.data(), K.data(), r.data(), q.data(), vol.data(), T.data(), result_simd.data(), BS_TEST_SIZE);
+        double simd_time = timer.elapsed();
         
         // Calculate maximum difference
         double max_diff = 0.0;
@@ -173,103 +220,61 @@ void test_sleef_functions() {
         size_t max_diff_index = 0;
         
         for (size_t i = 0; i < BS_TEST_SIZE; ++i) {
-            double diff = std::abs(result_std[i] - result_sleef[i]);
+            double diff = std::abs(result_std[i] - result_simd[i]);
             if (diff > max_diff) {
                 max_diff = diff;
                 max_diff_index = i;
             }
             
-            if (result_std[i] != 0.0) {
+            if (result_std[i] != 0.0f) {
                 double rel_diff = diff / std::abs(result_std[i]);
                 max_rel_diff = std::max(max_rel_diff, rel_diff);
             }
         }
         
-        // Report results
-        std::cout << "Black-Scholes Put pricing:\n";
+        std::cout << "Single-precision European Put pricing:\n";
         std::cout << "  Standard time:  " << std_time << " ms\n";
-        std::cout << "  SLEEF time:     " << sleef_time << " ms\n";
-        std::cout << "  Speedup:        " << std_time / sleef_time << "x\n";
+        std::cout << "  SIMD time:      " << simd_time << " ms\n";
+        std::cout << "  Speedup:        " << std_time / simd_time << "x\n";
         std::cout << "  Max abs diff:   " << std::scientific << max_diff 
                   << " at K=" << K[max_diff_index] << "\n";
-        std::cout << "  Max rel diff:   " << std::scientific << max_rel_diff << "\n\n";
+        std::cout << "  Max rel diff:   " << std::scientific << max_rel_diff << "\n";
+        std::cout << "  Options/second: " << BS_TEST_SIZE / (simd_time/1000) << " ops/sec\n\n";
         
         // Print a few sample values
         std::cout << "Sample values (first 5 options):\n";
-        std::cout << "  Strike   Standard    SLEEF       Diff\n";
+        std::cout << "  Strike   Standard    SIMD        Diff\n";
         std::cout << "  ------   --------    --------    ---------\n";
         for (size_t i = 0; i < 5; ++i) {
             std::cout << std::fixed << std::setprecision(6);
             std::cout << "  " << std::setw(6) << K[i] << "   " 
                       << std::setw(8) << result_std[i] << "    " 
-                      << std::setw(8) << result_sleef[i] << "    " 
+                      << std::setw(8) << result_simd[i] << "    " 
                       << std::scientific << std::setprecision(3) 
-                      << std::abs(result_std[i] - result_sleef[i]) << "\n";
-        }
-    }
-}
-
-/**
- * Test normal CDF precision specifically
- */
-void test_normal_cdf_precision() {
-    std::cout << "\n=== Testing Normal CDF Precision ===\n";
-    
-    const int TEST_SIZE = 20;
-    std::vector<double> x(TEST_SIZE);
-    
-    // Test range including extreme values
-    for (int i = 0; i < TEST_SIZE; i++) {
-        x[i] = -5.0 + i * 0.5;  // Range from -5 to +5
-    }
-    
-    std::vector<double> result_std(TEST_SIZE);
-    std::vector<double> result_simd(TEST_SIZE);
-    
-    // Calculate with standard library
-    for (int i = 0; i < TEST_SIZE; i++) {
-        result_std[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
-    }
-    
-    // Calculate with our implementation
-    VectorMath::normalCDF(x.data(), result_simd.data(), TEST_SIZE);
-    
-    // Compare results
-    std::cout << "     x      |   std::erf   |   SLEEF   |   Diff   \n";
-    std::cout << "------------------------------------------------\n";
-    
-    double max_diff = 0.0;
-    double max_rel_diff = 0.0;
-    
-    for (int i = 0; i < TEST_SIZE; i++) {
-        double diff = std::abs(result_std[i] - result_simd[i]);
-        double rel_diff = 0.0;
-        
-        if (std::abs(result_std[i]) > 1e-10) {
-            rel_diff = diff / std::abs(result_std[i]);
+                      << std::abs(result_std[i] - result_simd[i]) << "\n";
         }
         
-        max_diff = std::max(max_diff, diff);
-        max_rel_diff = std::max(max_rel_diff, rel_diff);
+        // Calculate overall accuracy and throughput
+        double mean_rel_diff = 0.0;
+        for (size_t i = 0; i < BS_TEST_SIZE; ++i) {
+            if (result_std[i] != 0.0f) {
+                mean_rel_diff += std::abs(result_std[i] - result_simd[i]) / std::abs(result_std[i]);
+            }
+        }
+        mean_rel_diff /= BS_TEST_SIZE;
         
-        std::cout << std::fixed << std::setprecision(6);
-        std::cout << std::setw(10) << x[i] << " | " 
-                  << std::setw(12) << result_std[i] << " | " 
-                  << std::setw(9) << result_simd[i] << " | "
-                  << std::scientific << std::setprecision(3)
-                  << std::setw(9) << diff << "\n";
+        std::cout << "  Mean rel diff:   " << std::scientific << mean_rel_diff << "\n";
+        std::cout << "  Throughput:      " << std::fixed << BS_TEST_SIZE * 1000 / simd_time 
+                  << " options/second\n\n";
     }
-    
-    std::cout << "\nSummary:\n";
-    std::cout << "  Max Difference: " << std::scientific << max_diff << "\n";
-    std::cout << "  Max Relative Difference: " << max_rel_diff * 100.0 << "%\n";
 }
 
 /**
  * Main function
  */
 int main() {
-    test_sleef_functions();
-    test_normal_cdf_precision();
+    std::cout << "=== Single-Precision Optimization Test ===\n";
+    test_single_precision_functions();
+    
     return 0;
 }

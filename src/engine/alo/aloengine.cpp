@@ -1,7 +1,7 @@
 #include "aloengine.h"
 #include "mod/american.h"
 #include "mod/european.h"
-#include "num/integrator.h"
+#include "num/integrate.h"
 #include "num/chebyshev.h"
 #include "opt/cache.h"
 #include "opt/simd.h"
@@ -17,9 +17,6 @@
 #include <array>
 #include <vector>
 #include <cstring> 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 namespace engine {
 namespace alo {
@@ -57,7 +54,6 @@ std::string ALOIterationScheme::getDescription() const {
  
 ALOEngine::ALOEngine(ALOScheme scheme, FixedPointEquation eq) 
      : equation_(eq) {
-     // Set up the scheme based on parameter
      setScheme(scheme);
 }
  
@@ -499,14 +495,15 @@ std::vector<double> ALOEngine::batchCalculatePut(double S, const std::vector<dou
                 results.data(), n
             );
         } else {
-            // For American options, use parallelized approach
+            // For American options, use parallelized approach (no OpenMP)
             return parallelBatchCalculatePut(S, strikes, r, q, vol, T);
         }
     }
     
     return results;
 }
- 
+
+// Modified version without OpenMP
 std::vector<double> ALOEngine::batchCalculatePut(double S, 
                                               const std::vector<std::tuple<double, double, double, double, double>>& options) const {
     // Return empty vector for empty input
@@ -517,19 +514,7 @@ std::vector<double> ALOEngine::batchCalculatePut(double S,
     std::vector<double> results(options.size());
     const size_t n = options.size();
     
-    // For small batches, just use scalar computation
-    if (n <= 4) {
-        for (size_t i = 0; i < n; ++i) {
-            const auto& [K, r, q, vol, T] = options[i];
-            results[i] = calculatePutImpl(S, K, r, q, vol, T);
-        }
-        return results;
-    }
-    
-    // For larger batches, parallelize with OpenMP if available
-    #ifdef _OPENMP
-    #pragma omp parallel for schedule(dynamic, 16)
-    #endif
+    // Process all options sequentially without OpenMP
     for (size_t i = 0; i < n; ++i) {
         const auto& [K, r, q, vol, T] = options[i];
         results[i] = calculatePutImpl(S, K, r, q, vol, T);
@@ -600,7 +585,8 @@ std::array<double, 4> ALOEngine::calculatePut4(
     // Use the full implementation for American options
     return calculatePut4(spots, strikes, rs, qs, vols, Ts);
 }
- 
+
+// Modified version without OpenMP
 std::vector<double> ALOEngine::batchCalculateCall(double S, const std::vector<double>& strikes,
                                                double r, double q, double vol, double T) const {
     // Return empty vector for empty input
@@ -633,10 +619,7 @@ std::vector<double> ALOEngine::batchCalculateCall(double S, const std::vector<do
                                   results.data(), n);
         }
     } else {
-        // For American calls, parallelize with OpenMP if available
-        #ifdef _OPENMP
-        #pragma omp parallel for schedule(dynamic, 32)
-        #endif
+        // For American calls, process sequentially (no OpenMP)
         for (size_t i = 0; i < n; ++i) {
             results[i] = calculateCallImpl(S, strikes[i], r, q, vol, T);
         }
@@ -645,13 +628,13 @@ std::vector<double> ALOEngine::batchCalculateCall(double S, const std::vector<do
     return results;
 }
  
-// NEW OPTIMIZED IMPLEMENTATION - Parallel Batch Calculate Put
+// NEW OPTIMIZED IMPLEMENTATION - Parallel Batch Calculate Put without OpenMP
 std::vector<double> ALOEngine::parallelBatchCalculatePut(double S, const std::vector<double>& strikes,
                                                      double r, double q, double vol, double T) const {
     const size_t n = strikes.size();
     if (n == 0) return {};
     
-    // For small batches, use the regular calculation to avoid thread overhead
+    // For small batches, use the regular calculation
     if (n <= 64) {
         return batchCalculatePut(S, strikes, r, q, vol, T);
     }
@@ -662,30 +645,7 @@ std::vector<double> ALOEngine::parallelBatchCalculatePut(double S, const std::ve
     // Determine European-only condition once
     bool use_european = (r <= 0.0 && r <= q);
     
-    // OpenMP parallel for with dynamic scheduling for better load balancing
-    #ifdef _OPENMP
-    #pragma omp parallel
-    {
-        // Process in chunks of 64 strikes
-        #pragma omp for schedule(dynamic, 64)
-        for (size_t i = 0; i < n; ++i) {
-            // Check for degenerate cases and European-only condition
-            if (vol <= 0.0 || T <= 0.0) {
-                results[i] = std::max(0.0, strikes[i] - S);
-                continue;
-            }
-            
-            if (use_european) {
-                // For European options, use Black-Scholes directly
-                results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
-            } else {
-                // For American options, use the full calculation
-                results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
-            }
-        }
-    }
-    #else
-    // Fallback for systems without OpenMP
+    // Use sequential processing (OpenMP removed)
     if (use_european) {
         for (size_t i = 0; i < n; ++i) {
             results[i] = blackScholesPut(S, strikes[i], r, q, vol, T);
@@ -695,12 +655,269 @@ std::vector<double> ALOEngine::parallelBatchCalculatePut(double S, const std::ve
             results[i] = calculatePutImpl(S, strikes[i], r, q, vol, T);
         }
     }
-    #endif
     
     return results;
 }
 
-// NEW IMPLEMENTATION - Process options using single-precision floats
+// Implementation of single-precision European option pricing
+float ALOEngine::calculateEuropeanSingle(double S, double K, double r, double q, 
+                                     double vol, double T, int optionType) const {
+    // Convert double inputs to float
+    float S_f = static_cast<float>(S);
+    float K_f = static_cast<float>(K);
+    float r_f = static_cast<float>(r);
+    float q_f = static_cast<float>(q);
+    float vol_f = static_cast<float>(vol);
+    float T_f = static_cast<float>(T);
+    
+    // Handle degenerate cases
+    if (vol_f <= 0.0f || T_f <= 0.0f) {
+        return optionType == 0 ? 
+            std::max(0.0f, K_f - S_f) : 
+            std::max(0.0f, S_f - K_f);
+    }
+    
+    // Calculate d1 and d2
+    float sqrt_T = std::sqrt(T_f);
+    float d1 = (std::log(S_f / K_f) + (r_f - q_f + 0.5f * vol_f * vol_f) * T_f) / 
+              (vol_f * sqrt_T);
+    float d2 = d1 - vol_f * sqrt_T;
+    
+    if (optionType == 0) { // PUT
+        // N(-d1) and N(-d2)
+        float Nd1 = 0.5f * (1.0f + num::fast_erf(-d1 / 1.414213562f));
+        float Nd2 = 0.5f * (1.0f + num::fast_erf(-d2 / 1.414213562f));
+        
+        return K_f * std::exp(-r_f * T_f) * Nd2 - S_f * std::exp(-q_f * T_f) * Nd1;
+    } else { // CALL
+        // N(d1) and N(d2)
+        float Nd1 = 0.5f * (1.0f + num::fast_erf(d1 / 1.414213562f));
+        float Nd2 = 0.5f * (1.0f + num::fast_erf(d2 / 1.414213562f));
+        
+        return S_f * std::exp(-q_f * T_f) * Nd1 - K_f * std::exp(-r_f * T_f) * Nd2;
+    }
+}
+
+// Implementation of single-precision American option pricing
+float ALOEngine::calculateAmericanSingle(double S, double K, double r, double q, 
+                                      double vol, double T, int optionType) const {
+    // Convert double inputs to float
+    float S_f = static_cast<float>(S);
+    float K_f = static_cast<float>(K);
+    float r_f = static_cast<float>(r);
+    float q_f = static_cast<float>(q);
+    float vol_f = static_cast<float>(vol);
+    float T_f = static_cast<float>(T);
+    
+    // European price as base
+    float euro_price = calculateEuropeanSingle(S, K, r, q, vol, T, optionType);
+    
+    // Early exercise premium (if any)
+    float premium = 0.0f;
+    
+    if (optionType == 0) { // PUT
+        // For put options, early exercise is potentially valuable when r > q
+        if (r_f > q_f) {
+            // Create a cache key for thread-local caching
+            opt::OptionKey key{S_f, K_f, r_f, q_f, vol_f, T_f, 0};
+            
+            // Check if in cache
+            auto& cache = opt::getThreadLocalCache();
+            auto it = cache.find(key);
+            if (it != cache.end()) {
+                return static_cast<float>(it->second);
+            }
+            
+            // Approximate critical price
+            float b = K_f * (1.0f - std::exp(-r_f * T_f));
+            if (q_f > 0.0f) {
+                b /= (1.0f - std::exp(-q_f * T_f));
+            }
+            
+            // If S <= b, early exercise may be optimal
+            if (S_f <= b) {
+                // For approximation - use Barone-Adesi Whaley
+                float power = 2.0f * r_f / (vol_f * vol_f);
+                float ratio = std::pow(S_f / b, power);
+                premium = std::max(0.0f, K_f - S_f - (K_f - b) * ratio);
+            }
+            
+            // Cache the result
+            float result = std::max(euro_price, K_f - S_f) + premium;
+            cache[key] = result;
+            return result;
+        }
+    } else { // CALL
+        // For call options, early exercise is potentially valuable when q > 0
+        if (q_f > 0.0f) {
+            // Create a cache key for thread-local caching
+            opt::OptionKey key{S_f, K_f, r_f, q_f, vol_f, T_f, 1};
+            
+            // Check if in cache
+            auto& cache = opt::getThreadLocalCache();
+            auto it = cache.find(key);
+            if (it != cache.end()) {
+                return static_cast<float>(it->second);
+            }
+            
+            // Calculate critical price using a simplification of Barone-Adesi Whaley
+            float q1 = 0.5f * (-(r_f - q_f) / (vol_f * vol_f) + 
+                            std::sqrt(std::pow((r_f - q_f) / (vol_f * vol_f), 2.0f) + 
+                                    8.0f * r_f / (vol_f * vol_f)));
+            
+            float critical_price = K_f / (1.0f - 1.0f / q1);
+            
+            // If S >= critical_price, exercise immediately
+            if (S_f >= critical_price) {
+                return S_f - K_f;
+            }
+            
+            // Otherwise, add early exercise premium
+            float ratio = std::pow(S_f / critical_price, q1);
+            premium = (critical_price - K_f) * (1.0f - ratio);
+            
+            // Cache the result
+            float result = euro_price + premium;
+            cache[key] = result;
+            return result;
+        }
+    }
+    
+    return euro_price;
+}
+
+// Implementation of batch calculation for single-precision puts
+std::vector<float> ALOEngine::batchCalculatePutSingle(
+    float S, const std::vector<float>& strikes,
+    float r, float q, float vol, float T) const {
+    
+    const size_t n = strikes.size();
+    if (n == 0) return {};
+    
+    std::vector<float> results(n);
+    
+    // Check for European-only condition
+    bool use_european = (r <= 0.0f && r <= q);
+    
+    // Handle degenerate cases
+    if (vol <= 0.0f || T <= 0.0f) {
+        for (size_t i = 0; i < n; ++i) {
+            results[i] = std::max(0.0f, strikes[i] - S);
+        }
+        return results;
+    }
+    
+    // Set up input arrays in SoA format for SIMD processing
+    std::vector<float> spots(n, S);
+    std::vector<float> rates(n, r);
+    std::vector<float> dividends(n, q);
+    std::vector<float> vols(n, vol);
+    std::vector<float> times(n, T);
+    
+    // Use appropriate pricing function based on condition
+    if (use_european) {
+        // European pricing is simpler and faster
+        opt::VectorSingle::EuropeanPut(
+            spots.data(), strikes.data(),
+            rates.data(), dividends.data(),
+            vols.data(), times.data(),
+            results.data(), n
+        );
+    } else {
+        // For American options, use optimized approximation
+        opt::VectorSingle::AmericanPut(
+            spots.data(), strikes.data(),
+            rates.data(), dividends.data(),
+            vols.data(), times.data(),
+            results.data(), n
+        );
+    }
+    
+    return results;
+}
+
+// Implementation of batch calculation for single-precision calls
+std::vector<float> ALOEngine::batchCalculateCallSingle(
+    float S, const std::vector<float>& strikes,
+    float r, float q, float vol, float T) const {
+    
+    const size_t n = strikes.size();
+    if (n == 0) return {};
+    
+    std::vector<float> results(n);
+    
+    // Check for European-only condition
+    bool use_european = (q <= 0.0f || (r < 0.0f && q >= r));
+    
+    // Handle degenerate cases
+    if (vol <= 0.0f || T <= 0.0f) {
+        for (size_t i = 0; i < n; ++i) {
+            results[i] = std::max(0.0f, S - strikes[i]);
+        }
+        return results;
+    }
+    
+    // Set up input arrays in SoA format for SIMD processing
+    std::vector<float> spots(n, S);
+    std::vector<float> rates(n, r);
+    std::vector<float> dividends(n, q);
+    std::vector<float> vols(n, vol);
+    std::vector<float> times(n, T);
+    
+    // Use appropriate pricing function based on condition
+    if (use_european) {
+        // European pricing is simpler and faster
+        opt::VectorSingle::EuropeanCall(
+            spots.data(), strikes.data(),
+            rates.data(), dividends.data(),
+            vols.data(), times.data(),
+            results.data(), n
+        );
+    } else {
+        // For American options, use optimized approximation
+        opt::VectorSingle::AmericanCall(
+            spots.data(), strikes.data(),
+            rates.data(), dividends.data(),
+            vols.data(), times.data(),
+            results.data(), n
+        );
+    }
+    
+    return results;
+}
+
+// Parallel batch calculation for single-precision puts (without OpenMP)
+std::vector<float> ALOEngine::parallelBatchCalculatePutSingle(
+    float S, const std::vector<float>& strikes,
+    float r, float q, float vol, float T) const {
+    
+    const size_t n = strikes.size();
+    if (n == 0) return {};
+    
+    // For small batches, use the regular calculation
+    if (n <= 64) {
+        return batchCalculatePutSingle(S, strikes, r, q, vol, T);
+    }
+    
+    // Allocate result space
+    std::vector<float> results(n);
+    
+    // Process in sequential chunks for maximum throughput
+    for (size_t i = 0; i < n; i += 64) {
+        size_t chunk_size = std::min<size_t>(64, n - i);
+        std::vector<float> chunk_strikes(strikes.begin() + i, strikes.begin() + i + chunk_size);
+        
+        // Process chunk
+        std::vector<float> chunk_results = batchCalculatePutSingle(S, chunk_strikes, r, q, vol, T);
+        
+        // Copy results back
+        std::copy(chunk_results.begin(), chunk_results.end(), results.begin() + i);
+    }
+    
+    return results;
+}
+
+// Implementation of single-precision batch processing without OpenMP
 std::vector<float> ALOEngine::batchCalculatePutFloat(
     float S, const std::vector<float>& strikes,
     float r, float q, float vol, float T) const {
@@ -737,10 +954,7 @@ std::vector<float> ALOEngine::batchCalculatePutFloat(
     std::vector<double> block_times(BLOCK_SIZE);
     std::vector<double> block_results(BLOCK_SIZE);
     
-    // Process main blocks using SIMD
-    #ifdef _OPENMP
-    #pragma omp parallel for schedule(dynamic)
-    #endif
+    // Process main blocks sequentially (no OpenMP)
     for (size_t block_start = 0; block_start < total_size; block_start += BLOCK_SIZE) {
         size_t block_end = std::min(block_start + BLOCK_SIZE, total_size);
         size_t block_size = block_end - block_start;
@@ -813,7 +1027,82 @@ void ALOEngine::processAVX512Chunk(double S, const double* strikes, double r, do
     }
 }
 #endif // __AVX512F__
-  
+
+// Run benchmark function
+void ALOEngine::runBenchmark(int numOptions) {
+    // Default to 10 million if not specified
+    if (numOptions <= 0) {
+        numOptions = 10000000;
+    }
+    
+    // Prepare test data
+    std::cout << "Preparing test data for " << numOptions << " options..." << std::endl;
+    
+    std::vector<float> spots(numOptions, 100.0f);
+    std::vector<float> strikes(numOptions);
+    std::vector<float> rates(numOptions, 0.05f);
+    std::vector<float> divs(numOptions, 0.02f);
+    std::vector<float> vols(numOptions, 0.2f);
+    std::vector<float> times(numOptions, 1.0f);
+    std::vector<float> results(numOptions);
+    
+    // Initialize strikes with small variations (80-120 range)
+    for (int i = 0; i < numOptions; i++) {
+        strikes[i] = 80.0f + (i % 41) * 1.0f;
+    }
+    
+    // Benchmark scalar implementation
+    std::cout << "Benchmarking scalar implementation..." << std::endl;
+    
+    auto start_scalar = std::chrono::high_resolution_clock::now();
+    
+    for (int i = 0; i < numOptions; i++) {
+        results[i] = calculateEuropeanSingle(
+            spots[i], strikes[i], rates[i], divs[i], vols[i], times[i], 0);
+    }
+    
+    auto end_scalar = std::chrono::high_resolution_clock::now();
+    double scalar_time = std::chrono::duration<double, std::milli>(end_scalar - start_scalar).count();
+    
+    std::cout << "Scalar time: " << scalar_time << " ms" << std::endl;
+    std::cout << "Scalar options per second: " << numOptions / (scalar_time / 1000) << std::endl;
+    
+    // Benchmark SIMD implementation
+    std::cout << "Benchmarking SIMD implementation..." << std::endl;
+    
+    auto start_simd = std::chrono::high_resolution_clock::now();
+    
+    opt::VectorSingle::EuropeanPut(
+        spots.data(), strikes.data(), rates.data(), divs.data(),
+        vols.data(), times.data(), results.data(), numOptions);
+    
+    auto end_simd = std::chrono::high_resolution_clock::now();
+    double simd_time = std::chrono::duration<double, std::milli>(end_simd - start_simd).count();
+    
+    std::cout << "SIMD time: " << simd_time << " ms" << std::endl;
+    std::cout << "SIMD options per second: " << numOptions / (simd_time / 1000) << std::endl;
+    std::cout << "Speedup: " << scalar_time / simd_time << "x" << std::endl;
+    
+    // Validate results
+    double max_diff = 0.0, avg_diff = 0.0;
+    std::vector<float> validation(numOptions);
+    
+    for (int i = 0; i < numOptions; i++) {
+        validation[i] = calculateEuropeanSingle(
+            spots[i], strikes[i], rates[i], divs[i], vols[i], times[i], 0);
+        
+        double diff = std::abs(validation[i] - results[i]);
+        max_diff = std::max(max_diff, diff);
+        avg_diff += diff;
+    }
+    
+    avg_diff /= numOptions;
+    
+    std::cout << "Validation:" << std::endl;
+    std::cout << "Max difference: " << std::scientific << max_diff << std::endl;
+    std::cout << "Avg difference: " << std::scientific << avg_diff << std::endl;
+}
+
 std::shared_ptr<ALOEngine::FixedPointEvaluator> ALOEngine::createFixedPointEvaluator(
     double K, double r, double q, double vol, 
     const std::function<double(double)>& B) const {

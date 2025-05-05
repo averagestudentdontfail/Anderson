@@ -9,16 +9,6 @@ LIB_DIR = lib
 TEST_DIR = test
 PRO_DIR = pro
 
-# OpenMP flags
-OMPFLAGS = -fopenmp
-CXXFLAGS += $(OMPFLAGS)
-
-# MPI configuration
-MPI_CXX := mpic++
-MPI_COMPILE_FLAGS := $(shell $(MPI_CXX) --showme:compile 2>/dev/null)
-MPI_LINK_FLAGS := $(shell $(MPI_CXX) --showme:link 2>/dev/null)
-CXXFLAGS += $(MPI_COMPILE_FLAGS) -DUSE_MPI
-
 # SLEEF configuration
 SLEEF_DIR = sleef
 SLEEF_INCLUDES = -I$(SLEEF_DIR)/include
@@ -41,7 +31,7 @@ TEST_OBJ = $(patsubst $(SRC_DIR)/engine/alo/test/%.cpp,$(BUILD_DIR)/engine/alo/t
 ALO_LIB = $(LIB_DIR)/libalo.a
 TEST_EXEC = $(BIN_DIR)/alo_test
 SLEEF_TEST = $(BIN_DIR)/sleef_test
-MPI_TEST = $(BIN_DIR)/mpi_test
+SIMD_TEST = $(BIN_DIR)/simd_test
 
 all: directories sleef $(ALO_LIB) tests
 
@@ -78,29 +68,26 @@ $(ALO_LIB): $(ENGINE_OBJ)
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(wildcard $(SRC_DIR)/engine/alo/*.h) $(wildcard $(SRC_DIR)/engine/alo/mod/*.h) $(wildcard $(SRC_DIR)/engine/alo/num/*.h) $(wildcard $(SRC_DIR)/engine/alo/opt/*.h)
 	@mkdir -p $(dir $@)
 	@echo "Compiling $< -> $@"
-	$(MPI_CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 	@# Process dependencies slightly differently for robustness
 	@sed -e 's/.*://' -e 's/\\$$//' < $(@:.o=.d) | fmt -1 | sed -e 's/^ *//' -e 's/$$/:/' >> $(@:.o=.d.processed)
 	@mv -f $(@:.o=.d.processed) $(@:.o=.P)
 	@rm -f $(@:.o=.d)
 
 # Build the tests
-tests: $(TEST_EXEC) $(SLEEF_TEST) $(MPI_TEST)
+tests: $(TEST_EXEC) $(SLEEF_TEST) $(SIMD_TEST)
 
 $(TEST_EXEC): $(BUILD_DIR)/engine/alo/test/alo_test.o $(ALO_LIB) $(SLEEF_STATIC_LIB)
 	@echo "Linking executable $@"
-	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_STATIC_LIB) $(MPI_LINK_FLAGS) $(LIBS)
+	$(CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_STATIC_LIB) $(LIBS)
 
 $(SLEEF_TEST): $(BUILD_DIR)/engine/alo/test/sleef_test.o $(ALO_LIB) $(SLEEF_STATIC_LIB)
 	@echo "Linking executable $@"
-	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_STATIC_LIB) $(MPI_LINK_FLAGS) $(LIBS)
+	$(CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_STATIC_LIB) $(LIBS)
 
-$(MPI_TEST): $(BUILD_DIR)/engine/alo/test/mpi_test.o $(ALO_LIB) $(SLEEF_STATIC_LIB)
+$(SIMD_TEST): $(BUILD_DIR)/engine/alo/test/simd_test.o $(ALO_LIB) $(SLEEF_STATIC_LIB)
 	@echo "Linking executable $@"
-	$(MPI_CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_STATIC_LIB) $(MPI_LINK_FLAGS) $(LIBS)
-
-mpi_test: $(MPI_TEST)
-	mpirun -np 4 ./$(MPI_TEST)
+	$(CXX) $(CXXFLAGS) $< -o $@ -L$(LIB_DIR) -lalo $(SLEEF_STATIC_LIB) $(LIBS)
 
 # --- Run Targets ---
 test: $(TEST_EXEC)
@@ -111,6 +98,10 @@ test_sleef: $(SLEEF_TEST)
 	@echo "Running sleef_test..."
 	./$(SLEEF_TEST)
 
+test_simd: $(SIMD_TEST)
+	@echo "Running simd_test..."
+	./$(SIMD_TEST)
+
 # --- Cleanup ---
 clean:
 	@echo "Cleaning build artifacts..."
@@ -119,11 +110,11 @@ clean:
 	rm -rf $(SLEEF_DIR)/build $(SLEEF_DIR)/lib $(SLEEF_DIR)/include
 
 # --- Utility Targets ---
-full: all test test_sleef
+full: all test test_sleef test_simd
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.P,$(ENGINE_SRC))
 endif
 
-.PHONY: all directories tests test test_sleef mpi_test clean full sleef
+.PHONY: all directories tests test test_sleef test_simd clean full sleef
 .SECONDARY: $(ENGINE_OBJ) $(TEST_OBJ)
