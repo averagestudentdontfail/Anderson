@@ -1,6 +1,6 @@
  #include "american.h"
  #include "../num/chebyshev.h"
- #include "../num/integrator.h"
+ #include "../num/integrate.h"
  #include <cmath>
  #include <stdexcept>
  #include <limits>

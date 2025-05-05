@@ -1,4 +1,4 @@
- #include "integrator.h"
+                                                                                                                             #include "integrator.h"
  #include <stdexcept>
  #include <cmath>
  #include <vector>
@@ -471,6 +471,449 @@
          throw std::invalid_argument("Unknown integrator type: " + scheme_type);
      }
  }
+
+ // ===== Single-precision Integrator Implementation =====
+
+// Default implementation for batch integration
+void IntegratorFloat::batchIntegrate(
+    const std::function<float(float)>& f,
+    const std::vector<float>& a,
+    const std::vector<float>& b,
+    std::vector<float>& results) const {
+    
+    if (results.size() < a.size()) {
+        results.resize(a.size());
+    }
+    
+    // Process in groups of 8 if possible (for AVX2)
+    size_t i = 0;
+    for (; i + 7 < a.size(); i += 8) {
+        // Process 8 integrals at once
+        for (size_t j = 0; j < 8; ++j) {
+            results[i + j] = integrate(f, a[i + j], b[i + j]);
+        }
+    }
+    
+    // Handle remaining elements
+    for (; i < a.size(); ++i) {
+        results[i] = integrate(f, a[i], b[i]);
+    }
+}
+
+/**
+ * @brief Gauss-Legendre quadrature implementation with single-precision
+ */
+class GaussLegendreIntegratorFloat : public IntegratorFloat {
+public:
+    /**
+     * @brief Constructor
+     * 
+     * @param order Number of integration points
+     */
+    explicit GaussLegendreIntegratorFloat(size_t order) : order_(order) {
+        if (order_ < 1) {
+            throw std::invalid_argument("GaussLegendreIntegratorFloat: Order must be at least 1");
+        }
+        initializeNodesAndWeights();
+    }
+    
+    /**
+     * @brief Destructor
+     */
+    ~GaussLegendreIntegratorFloat() override = default;
+    
+    /**
+     * @brief Integrate a function over an interval
+     * 
+     * @param f Function to integrate
+     * @param a Lower bound
+     * @param b Upper bound
+     * @return Approximate integral value
+     */
+    float integrate(const std::function<float(float)>& f, float a, float b) const override {
+        float result = 0.0f;
+        
+        // Handle zero-length interval
+        if (std::abs(b - a) < 1e-6f) {
+            return 0.0f;
+        }
+        
+        // Change of variable to map [a,b] to [-1,1]
+        const float half_length = 0.5f * (b - a);
+        const float mid_point = 0.5f * (a + b);
+        
+        for (size_t i = 0; i < order_; ++i) {
+            const float x = mid_point + half_length * nodes_[i];
+            result += weights_[i] * f(x);
+        }
+        
+        result *= half_length;
+        return result;
+    }
+    
+    /**
+     * @brief Get the name of the integrator
+     * 
+     * @return Integrator name
+     */
+    std::string name() const override {
+        return "Gauss-Legendre (float)";
+    }
+    
+    /**
+     * @brief Batch integrate a function using SIMD
+     * 
+     * This overridden method provides an optimized batch integration
+     * using SIMD instructions for better performance.
+     * 
+     * @param f Function to integrate
+     * @param a Lower bounds vector
+     * @param b Upper bounds vector
+     * @param results Vector to store results
+     */
+    void batchIntegrate(
+        const std::function<float(float)>& f,
+        const std::vector<float>& a,
+        const std::vector<float>& b,
+        std::vector<float>& results) const override {
+        
+        if (results.size() < a.size()) {
+            results.resize(a.size());
+        }
+        
+        // Process in groups of 8 for AVX2
+        size_t i = 0;
+        for (; i + 7 < a.size(); i += 8) {
+            // Load 8 lower and upper bounds
+            __m256 a_vec = _mm256_loadu_ps(&a[i]);
+            __m256 b_vec = _mm256_loadu_ps(&b[i]);
+            
+            // Calculate half-length and mid-point
+            __m256 half_length = _mm256_mul_ps(_mm256_set1_ps(0.5f), _mm256_sub_ps(b_vec, a_vec));
+            __m256 mid_point = _mm256_fmadd_ps(_mm256_set1_ps(0.5f), _mm256_add_ps(a_vec, b_vec), _mm256_setzero_ps());
+            
+            // Initialize result
+            __m256 result_vec = _mm256_setzero_ps();
+            
+            // Apply quadrature rule
+            for (size_t j = 0; j < order_; ++j) {
+                __m256 node_vec = _mm256_set1_ps(nodes_[j]);
+                __m256 weight_vec = _mm256_set1_ps(weights_[j]);
+                
+                // x = mid_point + half_length * nodes_[j]
+                __m256 x_vec = _mm256_fmadd_ps(half_length, node_vec, mid_point);
+                
+                // Evaluate function at 8 points (vectorization limitation)
+                float x_points[8];
+                _mm256_storeu_ps(x_points, x_vec);
+                
+                float f_values[8];
+                for (int k = 0; k < 8; ++k) {
+                    f_values[k] = f(x_points[k]);
+                }
+                
+                __m256 fx_vec = _mm256_loadu_ps(f_values);
+                
+                // result += weights_[j] * f(x)
+                result_vec = _mm256_fmadd_ps(weight_vec, fx_vec, result_vec);
+            }
+            
+            // Multiply by half_length
+            result_vec = _mm256_mul_ps(result_vec, half_length);
+            
+            // Store results
+            _mm256_storeu_ps(&results[i], result_vec);
+        }
+        
+        // Handle remaining elements
+        for (; i < a.size(); ++i) {
+            results[i] = integrate(f, a[i], b[i]);
+        }
+    }
+    
+private:
+    /**
+     * @brief Initialize Gauss-Legendre nodes and weights
+     */
+    void initializeNodesAndWeights() {
+        // Precomputed Gauss-Legendre nodes and weights for common orders
+        if (order_ == 7) {
+            nodes_ = {
+                -0.9491079123427585f, 
+                -0.7415311855993944f,
+                -0.4058451513773972f,
+                0.0f,
+                0.4058451513773972f,
+                0.7415311855993944f,
+                0.9491079123427585f
+            };
+            
+            weights_ = {
+                0.1294849661688697f,
+                0.2797053914892767f,
+                0.3818300505051189f,
+                0.4179591836734694f,
+                0.3818300505051189f,
+                0.2797053914892767f,
+                0.1294849661688697f
+            };
+        } else if (order_ == 8) {
+            // 8-point Gauss-Legendre quadrature (optimal for AVX2)
+            nodes_ = {
+                -0.9602898564975363f,
+                -0.7966664774136267f,
+                -0.5255324099163290f,
+                -0.1834346424956498f,
+                0.1834346424956498f,
+                0.5255324099163290f,
+                0.7966664774136267f,
+                0.9602898564975363f
+            };
+            
+            weights_ = {
+                0.1012285362903763f,
+                0.2223810344533745f,
+                0.3137066458778873f,
+                0.3626837833783620f,
+                0.3626837833783620f,
+                0.3137066458778873f,
+                0.2223810344533745f,
+                0.1012285362903763f
+            };
+        } else {
+            // For other orders, use a simple approach with single precision
+            nodes_.resize(order_);
+            weights_.resize(order_);
+            
+            for (size_t i = 0; i < order_; ++i) {
+                float theta = 3.14159265358979323846f * (i + 0.5f) / order_;
+                nodes_[i] = std::cos(theta);
+                weights_[i] = 3.14159265358979323846f / order_;
+            }
+        }
+    }
+    
+    size_t order_;
+    std::vector<float> nodes_;
+    std::vector<float> weights_;
+};
+
+/**
+ * @brief Adaptive quadrature implementation with single-precision
+ */
+class AdaptiveIntegratorFloat : public IntegratorFloat {
+public:
+    /**
+     * @brief Constructor
+     * 
+     * @param absolute_tolerance Absolute error tolerance
+     * @param relative_tolerance Relative error tolerance
+     * @param max_intervals Maximum number of intervals
+     */
+    AdaptiveIntegratorFloat(float absolute_tolerance, float relative_tolerance, size_t max_intervals)
+        : abs_tol_(absolute_tolerance), rel_tol_(relative_tolerance), max_intervals_(max_intervals) {
+        if (abs_tol_ <= 0.0f && rel_tol_ <= 0.0f) {
+            throw std::invalid_argument("AdaptiveIntegratorFloat: At least one tolerance must be positive");
+        }
+        if (max_intervals_ < 1) {
+            throw std::invalid_argument("AdaptiveIntegratorFloat: Max intervals must be at least 1");
+        }
+        
+        // Initialize Gauss-Kronrod nodes and weights for single-precision
+        initializeGaussKronrod();
+    }
+    
+    /**
+     * @brief Destructor
+     */
+    ~AdaptiveIntegratorFloat() override = default;
+    
+    /**
+     * @brief Integrate a function over an interval
+     * 
+     * @param f Function to integrate
+     * @param a Lower bound
+     * @param b Upper bound
+     * @return Approximate integral value
+     */
+    float integrate(const std::function<float(float)>& f, float a, float b) const override {
+        // Handle zero-length interval
+        if (std::abs(b - a) < 1e-6f) {
+            return 0.0f;
+        }
+        
+        // Initialize interval list with the whole interval
+        struct Interval {
+            float a;
+            float b;
+            float integral;
+            float error;
+        };
+        
+        std::vector<Interval> intervals;
+        
+        // Compute initial estimate for the whole interval
+        float integral, error;
+        gaussKronrodRule(f, a, b, integral, error);
+        
+        intervals.push_back({a, b, integral, error});
+        
+        float total_integral = integral;
+        float total_error = error;
+        
+        // Adaptive refinement
+        while (total_error > std::max(abs_tol_, rel_tol_ * std::abs(total_integral)) && 
+               intervals.size() < max_intervals_) {
+            
+            // Find interval with largest error
+            size_t worst_interval = 0;
+            float max_error = intervals[0].error;
+            
+            for (size_t i = 1; i < intervals.size(); ++i) {
+                if (intervals[i].error > max_error) {
+                    max_error = intervals[i].error;
+                    worst_interval = i;
+                }
+            }
+            
+            // Split the worst interval
+            float mid = 0.5f * (intervals[worst_interval].a + intervals[worst_interval].b);
+            
+            // Remove the contribution of the worst interval
+            total_integral -= intervals[worst_interval].integral;
+            total_error -= intervals[worst_interval].error;
+            
+            // Compute estimates for the two new intervals
+            float left_integral, left_error;
+            float right_integral, right_error;
+            
+            gaussKronrodRule(f, intervals[worst_interval].a, mid, left_integral, left_error);
+            gaussKronrodRule(f, mid, intervals[worst_interval].b, right_integral, right_error);
+            
+            // Replace the worst interval with the left subinterval
+            intervals[worst_interval] = {intervals[worst_interval].a, mid, left_integral, left_error};
+            
+            // Add the right subinterval
+            intervals.push_back({mid, intervals[worst_interval].b, right_integral, right_error});
+            
+            // Update total integral and error
+            total_integral += left_integral + right_integral;
+            total_error += left_error + right_error;
+        }
+        
+        // Final result
+        total_integral = 0.0f;
+        for (const auto& interval : intervals) {
+            total_integral += interval.integral;
+        }
+        
+        return total_integral;
+    }
+    
+    /**
+     * @brief Get the name of the integrator
+     * 
+     * @return Integrator name
+     */
+    std::string name() const override {
+        return "Adaptive Gauss-Kronrod (float)";
+    }
+    
+private:
+    /**
+     * @brief Initialize Gauss-Kronrod nodes and weights
+     */
+    void initializeGaussKronrod() {
+        // 15-point Gauss-Kronrod rule (7 Gauss points, 8 additional Kronrod points)
+        // Gauss nodes are at indices 0, 2, 4, 6, 8, 10, 12
+        // Kronrod nodes are at indices 1, 3, 5, 7, 9, 11, 13, 14
+        gk_nodes_ = {
+            -0.9914553711208126f, -0.9491079123427585f, -0.8648644233597691f, -0.7415311855993944f,
+            -0.5860872354676911f, -0.4058451513773972f, -0.2077849550078985f, 0.0f,
+            0.2077849550078985f, 0.4058451513773972f, 0.5860872354676911f, 0.7415311855993944f,
+            0.8648644233597691f, 0.9491079123427585f, 0.9914553711208126f
+        };
+        
+        // Gauss weights (used for error estimation)
+        g_weights_ = {
+            0.0f, 0.1294849661688697f, 0.0f, 0.2797053914892767f, 0.0f, 
+            0.3818300505051189f, 0.0f, 0.4179591836734694f, 0.0f,
+            0.3818300505051189f, 0.0f, 0.2797053914892767f, 0.0f, 
+            0.1294849661688697f, 0.0f
+        };
+        
+        // Kronrod weights
+        k_weights_ = {
+            0.0229353220105292f, 0.0630920926299786f, 0.1047900103222502f, 0.1406532597155259f,
+            0.1690047266392679f, 0.1903505780647854f, 0.2044329400752989f, 0.2094821410847278f,
+            0.2044329400752989f, 0.1903505780647854f, 0.1690047266392679f, 0.1406532597155259f,
+            0.1047900103222502f, 0.0630920926299786f, 0.0229353220105292f
+        };
+    }
+    
+    /**
+     * @brief Apply Gauss-Kronrod rule to an interval
+     * 
+     * @param f Function to integrate
+     * @param a Lower bound
+     * @param b Upper bound
+     * @param integral Computed integral value
+     * @param error Error estimate
+     */
+    void gaussKronrodRule(const std::function<float(float)>& f, float a, float b,
+                          float& integral, float& error) const {
+        // Change of variable to map [a,b] to [-1,1]
+        const float half_length = 0.5f * (b - a);
+        const float mid_point = 0.5f * (a + b);
+        
+        float gauss_integral = 0.0f;
+        float kronrod_integral = 0.0f;
+        
+        for (size_t i = 0; i < gk_nodes_.size(); ++i) {
+            const float x = mid_point + half_length * gk_nodes_[i];
+            const float fx = f(x);
+            
+            kronrod_integral += k_weights_[i] * fx;
+            
+            // Gauss nodes have non-zero weights
+            if (g_weights_[i] > 0.0f) {
+                gauss_integral += g_weights_[i] * fx;
+            }
+        }
+        
+        integral = half_length * kronrod_integral;
+        error = half_length * std::abs(kronrod_integral - gauss_integral);
+    }
+    
+    float abs_tol_;
+    float rel_tol_;
+    size_t max_intervals_;
+    
+    std::vector<float> gk_nodes_;
+    std::vector<float> g_weights_;
+    std::vector<float> k_weights_;
+};
+
+std::shared_ptr<IntegratorFloat> createIntegratorFloat(
+    const std::string& scheme_type,
+    size_t order,
+    float tolerance) {
+    
+    if (scheme_type == "GaussLegendre") {
+        if (order == 0) {
+            // Use 8 points as default for AVX2 optimization
+            order = 8;
+        }
+        return std::make_shared<GaussLegendreIntegratorFloat>(order);
+    } else if (scheme_type == "Adaptive") {
+        if (tolerance <= 0.0f) {
+            tolerance = 1e-6f;  // Default tolerance for single-precision
+        }
+        return std::make_shared<AdaptiveIntegratorFloat>(tolerance, tolerance, 1000);
+    } else {
+        throw std::invalid_argument("Unknown single-precision integrator type: " + scheme_type);
+    }
+}
  
  } // namespace num
  } // namespace alo

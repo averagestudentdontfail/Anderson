@@ -6,7 +6,7 @@
  #include <vector>
  #include <array>
  #include "../num/chebyshev.h"
- #include "../num/integrator.h"
+ #include "../num/integrate.h"
  
  namespace engine {
  namespace alo {
