@@ -1,338 +1,198 @@
 #include "simd.h"
-#include "../aloengine.h"
-#include "../mod/american.h"
-#include "../mod/european.h"
-#include "cache.h"
-#include "vector.h"
-#include <algorithm>
-#include <chrono>
-#include <iomanip>
-#include <iostream>
-#include <memory>
-#include <string>
-#include <vector>
+#include "../num/float.h"
+#include <cmath>
 
-using namespace engine::alo;
+namespace engine {
+namespace alo {
+namespace opt {
 
-/**
- * @brief Simple timer class for performance measurement
- */
-class Timer {
-public:
-  Timer() : start_(std::chrono::high_resolution_clock::now()) {}
+__m256 num::simd::erf_ps(__m256 x) {
+  // Extract sign for later reconstruction
+  __m256 sign_bit = _mm256_and_ps(x, _mm256_set1_ps(-0.0f));
 
-  double elapsed() const {
-    auto now = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> elapsed = now - start_;
-    return elapsed.count();
-  }
+  // Take absolute value of x
+  __m256 abs_x = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), x);
 
-  void reset() { start_ = std::chrono::high_resolution_clock::now(); }
+  // Constants for Abramowitz & Stegun approximation
+  const __m256 a1 = _mm256_set1_ps(0.254829592f);
+  const __m256 a2 = _mm256_set1_ps(-0.284496736f);
+  const __m256 a3 = _mm256_set1_ps(1.421413741f);
+  const __m256 a4 = _mm256_set1_ps(-1.453152027f);
+  const __m256 a5 = _mm256_set1_ps(1.061405429f);
+  const __m256 p = _mm256_set1_ps(0.3275911f);
 
-private:
-  std::chrono::time_point<std::chrono::high_resolution_clock> start_;
-};
+  // Calculate t = 1/(1 + p*|x|)
+  __m256 p_abs_x = _mm256_mul_ps(p, abs_x);
+  __m256 denom = _mm256_add_ps(_mm256_set1_ps(1.0f), p_abs_x);
+  __m256 t = _mm256_div_ps(_mm256_set1_ps(1.0f), denom);
 
-/**
- * @brief Run a simple pricing test
- */
-void runSimplePricingTest() {
-  std::cout << "\n=== Simple Pricing Test ===\n";
+  // Calculate polynomial using optimized operations
+  __m256 polynomial = _mm256_fmadd_ps(
+      _mm256_fmadd_ps(
+          _mm256_fmadd_ps(_mm256_fmadd_ps(_mm256_fmadd_ps(a5, t, a4), t, a3), t,
+                          a2),
+          t, a1),
+      t, _mm256_setzero_ps());
 
-  // Create ALO engine
-  ALOEngine engine(ACCURATE);
+  // Calculate e^(-x^2)
+  __m256 x_squared = _mm256_mul_ps(abs_x, abs_x);
+  __m256 neg_x_squared = _mm256_mul_ps(x_squared, _mm256_set1_ps(-1.0f));
+  __m256 exp_term = num::simd::exp_ps(neg_x_squared);
 
-  // Option parameters
-  double S = 100.0;
-  double K = 100.0;
-  double r = 0.05;
-  double q = 0.02;
-  double vol = 0.2;
-  double T = 1.0;
+  // Calculate final result: 1 - polynomial * exp(-x^2)
+  __m256 result =
+      _mm256_sub_ps(_mm256_set1_ps(1.0f), _mm256_mul_ps(polynomial, exp_term));
 
-  // Price American put
-  double americanPut = engine.calculateOption(S, K, r, q, vol, T, PUT);
-
-  // Price American call
-  double americanCall = engine.calculateOption(S, K, r, q, vol, T, CALL);
-
-  // Price European put
-  double europeanPut = ALOEngine::blackScholesPut(S, K, r, q, vol, T);
-
-  // Price European call
-  double europeanCall = ALOEngine::blackScholesCall(S, K, r, q, vol, T);
-
-  // Calculate early exercise premiums
-  double putPremium = americanPut - europeanPut;
-  double callPremium = americanCall - europeanCall;
-
-  // Print results
-  std::cout << std::fixed << std::setprecision(6);
-  std::cout << "Option Parameters:\n";
-  std::cout << "  Spot Price:         " << S << "\n";
-  std::cout << "  Strike Price:       " << K << "\n";
-  std::cout << "  Risk-Free Rate:     " << r << "\n";
-  std::cout << "  Dividend Yield:     " << q << "\n";
-  std::cout << "  Volatility:         " << vol << "\n";
-  std::cout << "  Time to Maturity:   " << T << " year\n\n";
-
-  std::cout << "Pricing Results:\n";
-  std::cout << "  European Put:       " << europeanPut << "\n";
-  std::cout << "  American Put:       " << americanPut << "\n";
-  std::cout << "  Put Premium:        " << putPremium << "\n\n";
-
-  std::cout << "  European Call:      " << europeanCall << "\n";
-  std::cout << "  American Call:      " << americanCall << "\n";
-  std::cout << "  Call Premium:       " << callPremium << "\n";
+  // Restore sign
+  return _mm256_xor_ps(result, sign_bit);
 }
 
-/**
- * @brief Run a batch pricing test
- */
-void runBatchPricingTest() {
-  std::cout << "\n=== Batch Pricing Test ===\n";
+// Implementation of normal_cdf_ps
+__m256 num::simd::normal_cdf_ps(__m256 x) {
+  // Scale factor for erf
+  const __m256 SQRT2_INV = _mm256_set1_ps(0.7071067811865475f); // 1/sqrt(2)
 
-  // Create ALO engine
-  ALOEngine engine(ACCURATE);
+  // Calculate erf(x/sqrt(2))
+  __m256 scaled_x = _mm256_mul_ps(x, SQRT2_INV);
+  __m256 erf_result = num::simd::erf_ps(scaled_x);
 
-  // Option parameters
-  double S = 100.0;
-  double r = 0.05;
-  double q = 0.02;
-  double vol = 0.2;
-  double T = 1.0;
-
-  // Create a range of strikes
-  std::vector<double> strikes;
-  for (double K = 80.0; K <= 120.0; K += 5.0) {
-    strikes.push_back(K);
-  }
-
-  // Batch price American puts
-  Timer timer;
-  auto putPrices = engine.batchCalculatePut(S, strikes, r, q, vol, T);
-  double batchTime = timer.elapsed();
-
-  // Individual pricing for comparison
-  timer.reset();
-  std::vector<double> individualPrices;
-  for (double K : strikes) {
-    individualPrices.push_back(engine.calculateOption(S, K, r, q, vol, T, PUT));
-  }
-  double individualTime = timer.elapsed();
-
-  // Compute European prices for comparison
-  std::vector<double> europeanPrices;
-  for (double K : strikes) {
-    europeanPrices.push_back(ALOEngine::blackScholesPut(S, K, r, q, vol, T));
-  }
-
-  // Print results
-  std::cout << std::fixed << std::setprecision(6);
-  std::cout << "Common Parameters:\n";
-  std::cout << "  Spot Price:         " << S << "\n";
-  std::cout << "  Risk-Free Rate:     " << r << "\n";
-  std::cout << "  Dividend Yield:     " << q << "\n";
-  std::cout << "  Volatility:         " << vol << "\n";
-  std::cout << "  Time to Maturity:   " << T << " year\n\n";
-
-  std::cout << "Pricing Results:\n";
-  std::cout << "Strike   European Put   American Put   Premium\n";
-  std::cout << "------   ------------   ------------   -------\n";
-
-  for (size_t i = 0; i < strikes.size(); ++i) {
-    double premium = putPrices[i] - europeanPrices[i];
-    std::cout << std::setw(6) << strikes[i] << "   " << std::setw(12)
-              << europeanPrices[i] << "   " << std::setw(12) << putPrices[i]
-              << "   " << std::setw(7) << premium << "\n";
-  }
-
-  std::cout << "\nPerformance:\n";
-  std::cout << "  Batch Pricing Time:      " << batchTime << " ms\n";
-  std::cout << "  Individual Pricing Time: " << individualTime << " ms\n";
-  std::cout << "  Speedup:                 " << individualTime / batchTime
-            << "x\n";
+  // Calculate 0.5 * (1 + erf(x/sqrt(2)))
+  return _mm256_mul_ps(_mm256_set1_ps(0.5f),
+                       _mm256_add_ps(_mm256_set1_ps(1.0f), erf_result));
 }
 
-/**
- * @brief Run a parallel pricing test
- */
-void runParallelPricingTest() {
-  std::cout << "\n=== Parallel Pricing Test ===\n";
+// Implementation of normal_pdf_ps
+__m256 num::simd::normal_pdf_ps(__m256 x) {
+  const __m256 NEG_HALF = _mm256_set1_ps(-0.5f);
+  const __m256 INV_SQRT_2PI = _mm256_set1_ps(0.3989422804f); // 1/sqrt(2π)
 
-  // Create ALO engine
-  ALOEngine engine(ACCURATE);
+  // Calculate x^2
+  __m256 x_squared = _mm256_mul_ps(x, x);
 
-  // Option parameters
-  double S = 100.0;
-  double r = 0.05;
-  double q = 0.02;
-  double vol = 0.2;
-  double T = 1.0;
+  // Calculate -0.5 * x^2
+  __m256 exponent = _mm256_mul_ps(NEG_HALF, x_squared);
 
-  // Create a large range of strikes
-  std::vector<double> strikes;
-  for (double K = 50.0; K <= 150.0; K += 0.5) {
-    strikes.push_back(K);
-  }
+  // Calculate exp(-0.5 * x^2)
+  __m256 exp_term = num::simd::exp_ps(exponent);
 
-  // Sequential pricing
-  Timer timer;
-  auto seqPrices = engine.batchCalculatePut(S, strikes, r, q, vol, T);
-  double seqTime = timer.elapsed();
-
-  // Parallel pricing
-  timer.reset();
-  auto parPrices = engine.parallelBatchCalculatePut(S, strikes, r, q, vol, T);
-  double parTime = timer.elapsed();
-
-  // Verify results
-  bool resultsMatch = true;
-  double maxDiff = 0.0;
-  for (size_t i = 0; i < strikes.size(); ++i) {
-    double diff = std::abs(seqPrices[i] - parPrices[i]);
-    maxDiff = std::max(maxDiff, diff);
-    if (diff > 1e-10) {
-      resultsMatch = false;
-    }
-  }
-
-  // Print performance results
-  std::cout << std::fixed << std::setprecision(6);
-  std::cout << "Performance for " << strikes.size() << " options:\n";
-  std::cout << "  Sequential Time:  " << seqTime << " ms\n";
-  std::cout << "  Parallel Time:    " << parTime << " ms\n";
-  std::cout << "  Speedup:          " << seqTime / parTime << "x\n";
-  std::cout << "  Results Match:    " << (resultsMatch ? "Yes" : "No") << "\n";
-  std::cout << "  Maximum Difference: " << maxDiff << "\n";
+  // Calculate exp(-0.5 * x^2) / sqrt(2π)
+  return _mm256_mul_ps(exp_term, INV_SQRT_2PI);
 }
 
-/**
- * @brief Run a SIMD optimization test
- */
-void runSimdOptimizationTest() {
-  std::cout << "\n=== SIMD Optimization Test ===\n";
+// Implementation of exp_ps using polynomial approximation
+__m256 num::simd::exp_ps(__m256 x) {
+  // Clamp input to avoid overflow/underflow
+  __m256 max_input = _mm256_set1_ps(88.3762626647949f);  // log(FLT_MAX)
+  __m256 min_input = _mm256_set1_ps(-88.3762626647949f); // log(FLT_MIN)
 
-  // Create test data
-  constexpr size_t dataSize = 1000000;
-  std::vector<double> x(dataSize);
-  std::vector<double> y(dataSize);
-  std::vector<double> z1(dataSize);
-  std::vector<double> z2(dataSize);
+  x = _mm256_max_ps(_mm256_min_ps(x, max_input), min_input);
 
-  // Initialize with some values
-  for (size_t i = 0; i < dataSize; ++i) {
-    x[i] = 0.1 * i;
-    y[i] = 0.2 * i;
-  }
+  // Express e^x as 2^(x/ln(2))
+  const __m256 ln2 = _mm256_set1_ps(0.693147180559945f);
+  __m256 x_over_ln2 = _mm256_div_ps(x, ln2);
 
-  // Test vector operations (standard)
-  Timer timer;
-  for (size_t i = 0; i < dataSize; ++i) {
-    z1[i] = std::exp(x[i]) * std::sqrt(y[i]);
-  }
-  double standardTime = timer.elapsed();
+  // Split into integer and fractional parts
+  __m256 x_int = _mm256_round_ps(x_over_ln2, _MM_FROUND_TO_NEAREST_INT);
+  __m256 x_frac = _mm256_sub_ps(x_over_ln2, x_int);
 
-  // Test vector operations (SIMD)
-  timer.reset();
-  std::vector<double> exp_x(dataSize);
-  std::vector<double> sqrt_y(dataSize);
+  // Compute 2^frac using polynomial approximation
+  // Coefficients for a degree-5 minimax approximation
+  const __m256 c0 = _mm256_set1_ps(1.0f);
+  const __m256 c1 = _mm256_set1_ps(0.693359375f);
+  const __m256 c2 = _mm256_set1_ps(0.2400844f);
+  const __m256 c3 = _mm256_set1_ps(0.0551904f);
+  const __m256 c4 = _mm256_set1_ps(0.0098892f);
+  const __m256 c5 = _mm256_set1_ps(0.0012398f);
 
-  opt::VectorMath::exp(x.data(), exp_x.data(), dataSize);
-  opt::VectorMath::sqrt(y.data(), sqrt_y.data(), dataSize);
-  opt::VectorMath::multiply(exp_x.data(), sqrt_y.data(), z2.data(), dataSize);
+  // Evaluate polynomial using Horner scheme
+  __m256 polynomial = _mm256_add_ps(
+      c0,
+      _mm256_mul_ps(
+          x_frac,
+          _mm256_add_ps(
+              c1, _mm256_mul_ps(
+                      x_frac,
+                      _mm256_add_ps(
+                          c2, _mm256_mul_ps(
+                                  x_frac,
+                                  _mm256_add_ps(
+                                      c3, _mm256_mul_ps(
+                                              x_frac,
+                                              _mm256_add_ps(
+                                                  c4, _mm256_mul_ps(
+                                                          x_frac, c5))))))))));
 
-  double simdTime = timer.elapsed();
+  // Convert int to float bits for 2^int (bit trick)
+  __m256i exp_int = _mm256_cvttps_epi32(x_int);
+  exp_int = _mm256_add_epi32(exp_int, _mm256_set1_epi32(127));
+  exp_int = _mm256_slli_epi32(exp_int, 23);
+  __m256 pow2_int = _mm256_castsi256_ps(exp_int);
 
-  // Verify results
-  double maxDiff = 0.0;
-  for (size_t i = 0; i < dataSize; ++i) {
-    double diff = std::abs(z1[i] - z2[i]);
-    maxDiff = std::max(maxDiff, diff);
-  }
-
-  // Print performance results
-  std::cout << std::fixed << std::setprecision(6);
-  std::cout << "Performance for " << dataSize << " operations:\n";
-  std::cout << "  Standard Time:    " << standardTime << " ms\n";
-  std::cout << "  SIMD Time:        " << simdTime << " ms\n";
-  std::cout << "  Speedup:          " << standardTime / simdTime << "x\n";
-  std::cout << "  Maximum Difference: " << maxDiff << "\n";
+  // Combine 2^int * 2^frac = 2^(int+frac) = e^x
+  return _mm256_mul_ps(pow2_int, polynomial);
 }
 
-/**
- * @brief Run a cache optimization test
- */
-void runCacheOptimizationTest() {
-  std::cout << "\n=== Cache Optimization Test ===\n";
+// Implementation of log_ps using polynomial approximation
+__m256 num::simd::log_ps(__m256 x) {
+  // Handle special cases: x <= 0
+  __m256 zero = _mm256_setzero_ps();
+  __m256 mask_zero_or_neg = _mm256_cmp_ps(x, zero, _CMP_LE_OQ);
+  __m256 nan_value = _mm256_set1_ps(std::numeric_limits<float>::quiet_NaN());
 
-  // Create ALO engines
-  ALOEngine engineNoCache(ACCURATE);
-  ALOEngine engineWithCache(ACCURATE);
+  // Extract exponent and mantissa using bit manipulation
+  __m256i x_bits = _mm256_castps_si256(x);
+  __m256i exp_bits = _mm256_srli_epi32(
+      _mm256_and_si256(x_bits, _mm256_set1_epi32(0x7F800000)), 23);
+  __m256 exponent =
+      _mm256_cvtepi32_ps(_mm256_sub_epi32(exp_bits, _mm256_set1_epi32(127)));
 
-  // Clear cache in the second engine
-  engineWithCache.clearCache();
+  // Calculate mantissa in [1, 2) range
+  __m256 mantissa = _mm256_or_ps(
+      _mm256_and_ps(x, _mm256_castsi256_ps(_mm256_set1_epi32(0x007FFFFF))),
+      _mm256_set1_ps(1.0f));
 
-  // Option parameters
-  double S = 100.0;
-  double K = 100.0;
-  double r = 0.05;
-  double q = 0.02;
-  double vol = 0.2;
-  double T = 1.0;
+  // Polynomial approximation for log(1+x) where x is mantissa-1
+  __m256 z = _mm256_sub_ps(mantissa, _mm256_set1_ps(1.0f));
 
-  // First pricing to warm up both engines
-  engineNoCache.calculateOption(S, K, r, q, vol, T, PUT);
-  engineWithCache.calculateOption(S, K, r, q, vol, T, PUT);
+  // Coefficients for log(1+z) minimax approximation
+  // log(1+z) ≈ z - z^2/2 + z^3/3 - z^4/4 + z^5/5 - z^6/6 + z^7/7
+  const __m256 c1 = _mm256_set1_ps(1.0f);
+  const __m256 c2 = _mm256_set1_ps(-0.5f);
+  const __m256 c3 = _mm256_set1_ps(0.333333333f);
+  const __m256 c4 = _mm256_set1_ps(-0.25f);
+  const __m256 c5 = _mm256_set1_ps(0.2f);
+  const __m256 c6 = _mm256_set1_ps(-0.166666667f);
+  const __m256 c7 = _mm256_set1_ps(0.142857143f);
 
-  // Test without cache (repeat pricing 1000 times)
-  Timer timer;
-  double resultNoCache = 0.0;
-  for (int i = 0; i < 1000; ++i) {
-    resultNoCache = engineNoCache.calculateOption(S, K, r, q, vol, T, PUT);
-  }
-  double timeNoCache = timer.elapsed();
+  // z, z^2, z^3, ...
+  __m256 z2 = _mm256_mul_ps(z, z);
+  __m256 z3 = _mm256_mul_ps(z2, z);
+  __m256 z4 = _mm256_mul_ps(z3, z);
+  __m256 z5 = _mm256_mul_ps(z4, z);
+  __m256 z6 = _mm256_mul_ps(z5, z);
+  __m256 z7 = _mm256_mul_ps(z6, z);
 
-  // Test with cache (repeat pricing 1000 times)
-  timer.reset();
-  double resultWithCache = 0.0;
-  for (int i = 0; i < 1000; ++i) {
-    resultWithCache = engineWithCache.calculateOption(S, K, r, q, vol, T, PUT);
-  }
-  double timeWithCache = timer.elapsed();
+  // Evaluate polynomial
+  __m256 log_mantissa = _mm256_add_ps(
+      _mm256_mul_ps(c1, z),
+      _mm256_add_ps(
+          _mm256_mul_ps(c2, z2),
+          _mm256_add_ps(
+              _mm256_mul_ps(c3, z3),
+              _mm256_add_ps(
+                  _mm256_mul_ps(c4, z4),
+                  _mm256_add_ps(_mm256_mul_ps(c5, z5),
+                                _mm256_add_ps(_mm256_mul_ps(c6, z6),
+                                              _mm256_mul_ps(c7, z7)))))));
 
-  // Print performance results
-  std::cout << std::fixed << std::setprecision(6);
-  std::cout << "Performance for 1000 repeated pricings:\n";
-  std::cout << "  Time without Cache: " << timeNoCache << " ms\n";
-  std::cout << "  Time with Cache:    " << timeWithCache << " ms\n";
-  std::cout << "  Speedup:            " << timeNoCache / timeWithCache << "x\n";
-  std::cout << "  Results Match:      "
-            << (std::abs(resultNoCache - resultWithCache) < 1e-10 ? "Yes"
-                                                                  : "No")
-            << "\n";
-  std::cout << "  Cache Size:         " << engineWithCache.getCacheSize()
-            << " entries\n";
+  // log(x) = log(2^exp * mantissa) = exp*log(2) + log(mantissa)
+  const __m256 ln2 = _mm256_set1_ps(0.693147180559945f);
+  __m256 result = _mm256_add_ps(_mm256_mul_ps(exponent, ln2), log_mantissa);
+
+  // Apply mask for zero or negative input
+  return _mm256_blendv_ps(result, nan_value, mask_zero_or_neg);
 }
 
-/**
- * @brief Main function
- */
-int main() {
-  std::cout << "=== ALO Engine Test Program ===\n";
-
-  try {
-    // Run various tests
-    runSimplePricingTest();
-    runBatchPricingTest();
-    runParallelPricingTest();
-    runSimdOptimizationTest();
-    runCacheOptimizationTest();
-
-    std::cout << "\nAll tests completed successfully.\n";
-    return 0;
-  } catch (const std::exception &e) {
-    std::cerr << "Error: " << e.what() << std::endl;
-    return 1;
-  }
-}
+} // namespace opt
+} // namespace alo
+} // namespace engine
