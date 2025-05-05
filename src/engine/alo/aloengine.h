@@ -2,7 +2,6 @@
 #define ENGINE_ALO_ALOENGINE_H
 
 #include "aloscheme.h"
-#include "alodistribute.h"
 #include <immintrin.h>
 #include <sleef.h> 
 #include <memory>
@@ -17,6 +16,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <deque>
+#include <chrono>
 
 // Forward declarations
 namespace engine {
@@ -303,8 +303,6 @@ public:
     /**
      * @brief Parallel batch pricing for large numbers of put options
      * 
-     * Uses OpenMP to accelerate batch pricing across multiple threads
-     * 
      * @param S Current spot price
      * @param strikes Vector of strike prices
      * @param r Risk-free interest rate
@@ -332,11 +330,71 @@ public:
                         double vol, double T, double* results, size_t size) const;
     
     /**
-     * @brief Process options using single-precision floats for better SIMD performance
+     * @brief Process options using single-precision for better SIMD performance
+     * 
+     * @param S Current spot price
+     * @param strikes Vector of strike prices
+     * @param r Risk-free interest rate
+     * @param q Dividend yield
+     * @param vol Volatility
+     * @param T Time to maturity in years
+     * @return Vector of put option prices in single precision
      */
-    std::vector<float> batchCalculatePutFloat(
+    std::vector<float> batchCalculatePutSingle(
         float S, const std::vector<float>& strikes,
         float r, float q, float vol, float T) const;
+
+    /**
+     * @brief Process call options using single-precision for better SIMD performance
+     * 
+     * @param S Current spot price
+     * @param strikes Vector of strike prices
+     * @param r Risk-free interest rate
+     * @param q Dividend yield
+     * @param vol Volatility
+     * @param T Time to maturity in years
+     * @return Vector of call option prices in single precision
+     */
+    std::vector<float> batchCalculateCallSingle(
+        float S, const std::vector<float>& strikes,
+        float r, float q, float vol, float T) const;
+
+    /**
+     * @brief Single-precision European option pricing
+     * 
+     * @param S Current spot price
+     * @param K Strike price
+     * @param r Risk-free interest rate
+     * @param q Dividend yield
+     * @param vol Volatility
+     * @param T Time to maturity in years
+     * @param optionType Option type (0=PUT, 1=CALL)
+     * @return Option price in single precision
+     */
+    float calculateEuropeanSingle(double S, double K, double r, double q, 
+                               double vol, double T, int optionType) const;
+
+    /**
+     * @brief Single-precision American option pricing
+     * 
+     * @param S Current spot price
+     * @param K Strike price
+     * @param r Risk-free interest rate
+     * @param q Dividend yield
+     * @param vol Volatility
+     * @param T Time to maturity in years
+     * @param optionType Option type (0=PUT, 1=CALL)
+     * @return Option price in single precision
+     */
+    float calculateAmericanSingle(double S, double K, double r, double q, 
+                               double vol, double T, int optionType) const;
+                        
+    /**
+     * @brief Run benchmark comparing scalar and SIMD implementations
+     * 
+     * @param numOptions Number of options to price in the benchmark (default: 10 million)
+     */
+    void runBenchmark(int numOptions = 10000000);
                         
     #ifdef __AVX512F__
     /**
@@ -405,6 +463,14 @@ private:
      */
     __m256d calculatePutPremium4(__m256d S, __m256d K, __m256d r, __m256d q, 
                               __m256d vol, __m256d T) const;
+    
+    /**
+     * @brief Parallel batch pricing for large numbers of put options
+     * using single-precision calculations
+     */
+    std::vector<float> parallelBatchCalculatePutSingle(
+        float S, const std::vector<float>& strikes,
+        float r, float q, float vol, float T) const;
     
     /**
      * @class FixedPointEvaluator
