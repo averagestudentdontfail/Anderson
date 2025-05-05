@@ -13,37 +13,28 @@ namespace alo {
 namespace mod {
 
 /**
- * @class AmericanOption
- * @brief Base class for American option pricing models
+ * @class AmericanOptionDouble
+ * @brief Base class for double-precision American option pricing models
  *
  * This class provides common functionality for American option pricing
  * using the Anderson-Lake-Offengelden algorithm.
  */
-class AmericanOption {
+class AmericanOptionDouble {
 public:
   /**
    * @brief Constructor
    *
    * @param integrator Integrator for calculating the early exercise premium
    */
-  explicit AmericanOption(std::shared_ptr<num::Integrator> integrator);
+  explicit AmericanOptionDouble(std::shared_ptr<num::Integrator> integrator);
 
   /**
    * @brief Destructor
    */
-  virtual ~AmericanOption() = default;
+  virtual ~AmericanOptionDouble() = default;
 
   /**
    * @brief Calculate the early exercise premium
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param boundary Early exercise boundary
-   * @return Early exercise premium
    */
   virtual double calculateEarlyExercisePremium(
       double S, double K, double r, double q, double vol, double T,
@@ -51,17 +42,6 @@ public:
 
   /**
    * @brief Calculate the early exercise boundary
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param num_nodes Number of Chebyshev nodes
-   * @param num_iterations Number of fixed point iterations
-   * @param fpIntegrator Integrator for fixed point calculations
-   * @return Early exercise boundary as Chebyshev interpolation
    */
   virtual std::shared_ptr<num::ChebyshevInterpolation>
   calculateExerciseBoundary(
@@ -71,18 +51,11 @@ public:
 
   /**
    * @brief Calculate the maximum early exercise boundary value
-   *
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @return Maximum boundary value
    */
   virtual double xMax(double K, double r, double q) const = 0;
 
   /**
    * @brief Get the integrator
-   *
-   * @return Integrator used for calculations
    */
   std::shared_ptr<num::Integrator> getIntegrator() const { return integrator_; }
 
@@ -91,31 +64,22 @@ protected:
 };
 
 /**
- * @class AmericanPut
- * @brief American put option pricing model
+ * @class AmericanPutDouble
+ * @brief Double-precision American put option pricing model
  *
  * This class implements American put option pricing using the ALO algorithm.
  */
-class AmericanPut : public AmericanOption {
+class AmericanPutDouble : public AmericanOptionDouble {
 public:
   /**
    * @brief Constructor
    *
    * @param integrator Integrator for calculating the early exercise premium
    */
-  explicit AmericanPut(std::shared_ptr<num::Integrator> integrator);
+  explicit AmericanPutDouble(std::shared_ptr<num::Integrator> integrator);
 
   /**
    * @brief Calculate the early exercise premium
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param boundary Early exercise boundary
-   * @return Early exercise premium
    */
   double calculateEarlyExercisePremium(
       double S, double K, double r, double q, double vol, double T,
@@ -124,17 +88,6 @@ public:
 
   /**
    * @brief Calculate the early exercise boundary
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param num_nodes Number of Chebyshev nodes
-   * @param num_iterations Number of fixed point iterations
-   * @param fpIntegrator Integrator for fixed point calculations
-   * @return Early exercise boundary as Chebyshev interpolation
    */
   std::shared_ptr<num::ChebyshevInterpolation> calculateExerciseBoundary(
       double S, double K, double r, double q, double vol, double T,
@@ -143,41 +96,27 @@ public:
 
   /**
    * @brief Calculate the maximum early exercise boundary value
-   *
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @return Maximum boundary value
    */
   double xMax(double K, double r, double q) const override;
 };
 
 /**
- * @class AmericanCall
- * @brief American call option pricing model
+ * @class AmericanCallDouble
+ * @brief Double-precision American call option pricing model
  *
  * This class implements American call option pricing using the ALO algorithm.
  */
-class AmericanCall : public AmericanOption {
+class AmericanCallDouble : public AmericanOptionDouble {
 public:
   /**
    * @brief Constructor
    *
    * @param integrator Integrator for calculating the early exercise premium
    */
-  explicit AmericanCall(std::shared_ptr<num::Integrator> integrator);
+  explicit AmericanCallDouble(std::shared_ptr<num::Integrator> integrator);
 
   /**
    * @brief Calculate the early exercise premium
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param boundary Early exercise boundary
-   * @return Early exercise premium
    */
   double calculateEarlyExercisePremium(
       double S, double K, double r, double q, double vol, double T,
@@ -186,17 +125,6 @@ public:
 
   /**
    * @brief Calculate the early exercise boundary
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param num_nodes Number of Chebyshev nodes
-   * @param num_iterations Number of fixed point iterations
-   * @param fpIntegrator Integrator for fixed point calculations
-   * @return Early exercise boundary as Chebyshev interpolation
    */
   std::shared_ptr<num::ChebyshevInterpolation> calculateExerciseBoundary(
       double S, double K, double r, double q, double vol, double T,
@@ -205,85 +133,55 @@ public:
 
   /**
    * @brief Calculate the maximum early exercise boundary value
-   *
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @return Maximum boundary value
    */
   double xMax(double K, double r, double q) const override;
 };
 
 /**
- * @class FixedPointEvaluator
- * @brief Base class for fixed point equation evaluators
+ * @class FixedPointEvaluatorDouble
+ * @brief Base class for double-precision fixed point equation evaluators
  *
  * This class defines the interface for fixed point equation evaluators
  * used in the ALO algorithm to compute early exercise boundaries.
  */
-class FixedPointEvaluator {
+class FixedPointEvaluatorDouble {
 public:
   /**
    * @brief Constructor
-   *
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param B Boundary function
-   * @param integrator Integrator for fixed point calculations
    */
-  FixedPointEvaluator(double K, double r, double q, double vol,
-                      const std::function<double(double)> &B,
-                      std::shared_ptr<num::Integrator> integrator);
+  FixedPointEvaluatorDouble(double K, double r, double q, double vol,
+                            const std::function<double(double)> &B,
+                            std::shared_ptr<num::Integrator> integrator);
 
   /**
    * @brief Destructor
    */
-  virtual ~FixedPointEvaluator() = default;
+  virtual ~FixedPointEvaluatorDouble() = default;
 
   /**
    * @brief Evaluate the fixed point equation
-   *
-   * @param tau Time to maturity
-   * @param b Boundary value
-   * @return Tuple of (N, D, f(b)) where f(b) is the fixed point equation value
    */
   virtual std::tuple<double, double, double> evaluate(double tau,
                                                       double b) const = 0;
 
   /**
    * @brief Calculate derivatives of the fixed point equation
-   *
-   * @param tau Time to maturity
-   * @param b Boundary value
-   * @return Pair of (N', D') derivatives
    */
   virtual std::pair<double, double> derivatives(double tau, double b) const = 0;
 
 protected:
   /**
    * @brief Calculate d1 and d2 terms for Black-Scholes
-   *
-   * @param t Time
-   * @param z Price ratio
-   * @return Pair of (d1, d2)
    */
   std::pair<double, double> d(double t, double z) const;
 
   /**
    * @brief Calculate normal CDF
-   *
-   * @param x Input value
-   * @return Normal CDF at x
    */
   double normalCDF(double x) const;
 
   /**
    * @brief Calculate normal PDF
-   *
-   * @param x Input value
-   * @return Normal PDF at x
    */
   double normalPDF(double x) const;
 
@@ -298,135 +196,86 @@ protected:
 };
 
 /**
- * @class EquationA
- * @brief Implementation of Equation A from the ALO paper
+ * @class EquationADouble
+ * @brief Double-precision implementation of Equation A from the ALO paper
  */
-class EquationA : public FixedPointEvaluator {
+class EquationADouble : public FixedPointEvaluatorDouble {
 public:
   /**
    * @brief Constructor
-   *
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param B Boundary function
-   * @param integrator Integrator for fixed point calculations
    */
-  EquationA(double K, double r, double q, double vol,
-            const std::function<double(double)> &B,
-            std::shared_ptr<num::Integrator> integrator);
+  EquationADouble(double K, double r, double q, double vol,
+                  const std::function<double(double)> &B,
+                  std::shared_ptr<num::Integrator> integrator);
 
   /**
    * @brief Evaluate the fixed point equation
-   *
-   * @param tau Time to maturity
-   * @param b Boundary value
-   * @return Tuple of (N, D, f(b)) where f(b) is the fixed point equation value
    */
   std::tuple<double, double, double> evaluate(double tau,
                                               double b) const override;
 
   /**
    * @brief Calculate derivatives of the fixed point equation
-   *
-   * @param tau Time to maturity
-   * @param b Boundary value
-   * @return Pair of (N', D') derivatives
    */
   std::pair<double, double> derivatives(double tau, double b) const override;
 };
 
 /**
- * @class EquationB
- * @brief Implementation of Equation B from the ALO paper
+ * @class EquationBDouble
+ * @brief Double-precision implementation of Equation B from the ALO paper
  */
-class EquationB : public FixedPointEvaluator {
+class EquationBDouble : public FixedPointEvaluatorDouble {
 public:
   /**
    * @brief Constructor
-   *
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param B Boundary function
-   * @param integrator Integrator for fixed point calculations
    */
-  EquationB(double K, double r, double q, double vol,
-            const std::function<double(double)> &B,
-            std::shared_ptr<num::Integrator> integrator);
+  EquationBDouble(double K, double r, double q, double vol,
+                  const std::function<double(double)> &B,
+                  std::shared_ptr<num::Integrator> integrator);
 
   /**
    * @brief Evaluate the fixed point equation
-   *
-   * @param tau Time to maturity
-   * @param b Boundary value
-   * @return Tuple of (N, D, f(b)) where f(b) is the fixed point equation value
    */
   std::tuple<double, double, double> evaluate(double tau,
                                               double b) const override;
 
   /**
    * @brief Calculate derivatives of the fixed point equation
-   *
-   * @param tau Time to maturity
-   * @param b Boundary value
-   * @return Pair of (N', D') derivatives
    */
   std::pair<double, double> derivatives(double tau, double b) const override;
 };
 
 /**
- * @brief Create a fixed point evaluator
- *
- * @param equation Equation type (A or B)
- * @param K Strike price
- * @param r Risk-free interest rate
- * @param q Dividend yield
- * @param vol Volatility
- * @param B Boundary function
- * @param integrator Integrator for fixed point calculations
- * @return Shared pointer to fixed point evaluator
+ * @brief Create a double-precision fixed point evaluator
  */
-std::shared_ptr<FixedPointEvaluator>
-createFixedPointEvaluator(char equation, double K, double r, double q,
-                          double vol, const std::function<double(double)> &B,
-                          std::shared_ptr<num::Integrator> integrator);
+std::shared_ptr<FixedPointEvaluatorDouble>
+createFixedPointEvaluatorDouble(char equation, double K, double r, double q,
+                                double vol,
+                                const std::function<double(double)> &B,
+                                std::shared_ptr<num::Integrator> integrator);
 
 /**
- * @class AmericanOptionFloat
+ * @class AmericanOptionSingle
  * @brief Base class for single-precision American option pricing models
  *
  * This class provides common functionality for American option pricing
  * using the Anderson-Lake-Offengelden algorithm with single-precision.
  */
-class AmericanOptionFloat {
+class AmericanOptionSingle {
 public:
   /**
    * @brief Constructor
-   *
-   * @param integrator Integrator for calculating the early exercise premium
    */
-  explicit AmericanOptionFloat(
+  explicit AmericanOptionSingle(
       std::shared_ptr<num::IntegratorFloat> integrator);
 
   /**
    * @brief Destructor
    */
-  virtual ~AmericanOptionFloat() = default;
+  virtual ~AmericanOptionSingle() = default;
 
   /**
    * @brief Calculate the early exercise premium
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param boundary Early exercise boundary
-   * @return Early exercise premium
    */
   virtual float calculateEarlyExercisePremium(
       float S, float K, float r, float q, float vol, float T,
@@ -435,17 +284,6 @@ public:
 
   /**
    * @brief Calculate the early exercise boundary
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param num_nodes Number of Chebyshev nodes
-   * @param num_iterations Number of fixed point iterations
-   * @param fpIntegrator Integrator for fixed point calculations
-   * @return Early exercise boundary as Chebyshev interpolation
    */
   virtual std::shared_ptr<num::ChebyshevInterpolationFloat>
   calculateExerciseBoundary(
@@ -455,18 +293,11 @@ public:
 
   /**
    * @brief Calculate the maximum early exercise boundary value
-   *
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @return Maximum boundary value
    */
   virtual float xMax(float K, float r, float q) const = 0;
 
   /**
    * @brief Get the integrator
-   *
-   * @return Integrator used for calculations
    */
   std::shared_ptr<num::IntegratorFloat> getIntegrator() const {
     return integrator_;
@@ -477,32 +308,21 @@ protected:
 };
 
 /**
- * @class AmericanPutFloat
+ * @class AmericanPutSingle
  * @brief Single-precision American put option pricing model
  *
  * This class implements American put option pricing using the ALO algorithm
  * with single-precision and optimized numerical methods.
  */
-class AmericanPutFloat : public AmericanOptionFloat {
+class AmericanPutSingle : public AmericanOptionSingle {
 public:
   /**
    * @brief Constructor
-   *
-   * @param integrator Integrator for calculating the early exercise premium
    */
-  explicit AmericanPutFloat(std::shared_ptr<num::IntegratorFloat> integrator);
+  explicit AmericanPutSingle(std::shared_ptr<num::IntegratorFloat> integrator);
 
   /**
    * @brief Calculate the early exercise premium
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param boundary Early exercise boundary
-   * @return Early exercise premium
    */
   float calculateEarlyExercisePremium(
       float S, float K, float r, float q, float vol, float T,
@@ -511,17 +331,6 @@ public:
 
   /**
    * @brief Calculate the early exercise boundary
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param num_nodes Number of Chebyshev nodes
-   * @param num_iterations Number of fixed point iterations
-   * @param fpIntegrator Integrator for fixed point calculations
-   * @return Early exercise boundary as Chebyshev interpolation
    */
   std::shared_ptr<num::ChebyshevInterpolationFloat> calculateExerciseBoundary(
       float S, float K, float r, float q, float vol, float T, size_t num_nodes,
@@ -530,38 +339,17 @@ public:
 
   /**
    * @brief Calculate the maximum early exercise boundary value
-   *
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @return Maximum boundary value
    */
   float xMax(float K, float r, float q) const override;
 
   /**
    * @brief Approximate American put price with Barone-Adesi-Whaley method
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @return Approximate American put price
    */
   float approximatePrice(float S, float K, float r, float q, float vol,
                          float T) const;
 
   /**
    * @brief Calculate a batch of American put prices using approximation
-   *
-   * @param S Current spot price
-   * @param strikes Vector of strike prices
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @return Vector of American put prices
    */
   std::vector<float> batchApproximatePrice(float S,
                                            const std::vector<float> &strikes,
@@ -570,32 +358,21 @@ public:
 };
 
 /**
- * @class AmericanCallFloat
+ * @class AmericanCallSingle
  * @brief Single-precision American call option pricing model
  *
  * This class implements American call option pricing using the ALO algorithm
  * with single-precision and optimized numerical methods.
  */
-class AmericanCallFloat : public AmericanOptionFloat {
+class AmericanCallSingle : public AmericanOptionSingle {
 public:
   /**
    * @brief Constructor
-   *
-   * @param integrator Integrator for calculating the early exercise premium
    */
-  explicit AmericanCallFloat(std::shared_ptr<num::IntegratorFloat> integrator);
+  explicit AmericanCallSingle(std::shared_ptr<num::IntegratorFloat> integrator);
 
   /**
    * @brief Calculate the early exercise premium
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param boundary Early exercise boundary
-   * @return Early exercise premium
    */
   float calculateEarlyExercisePremium(
       float S, float K, float r, float q, float vol, float T,
@@ -604,17 +381,6 @@ public:
 
   /**
    * @brief Calculate the early exercise boundary
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @param num_nodes Number of Chebyshev nodes
-   * @param num_iterations Number of fixed point iterations
-   * @param fpIntegrator Integrator for fixed point calculations
-   * @return Early exercise boundary as Chebyshev interpolation
    */
   std::shared_ptr<num::ChebyshevInterpolationFloat> calculateExerciseBoundary(
       float S, float K, float r, float q, float vol, float T, size_t num_nodes,
@@ -623,38 +389,17 @@ public:
 
   /**
    * @brief Calculate the maximum early exercise boundary value
-   *
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @return Maximum boundary value
    */
   float xMax(float K, float r, float q) const override;
 
   /**
    * @brief Approximate American call price with Barone-Adesi-Whaley method
-   *
-   * @param S Current spot price
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @return Approximate American call price
    */
   float approximatePrice(float S, float K, float r, float q, float vol,
                          float T) const;
 
   /**
    * @brief Calculate a batch of American call prices using approximation
-   *
-   * @param S Current spot price
-   * @param strikes Vector of strike prices
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param T Time to maturity in years
-   * @return Vector of American call prices
    */
   std::vector<float> batchApproximatePrice(float S,
                                            const std::vector<float> &strikes,
@@ -663,76 +408,51 @@ public:
 };
 
 /**
- * @class FixedPointEvaluatorFloat
+ * @class FixedPointEvaluatorSingle
  * @brief Base class for single-precision fixed point equation evaluators
  *
  * This class defines the interface for fixed point equation evaluators
  * used in the ALO algorithm to compute early exercise boundaries with
  * single-precision.
  */
-class FixedPointEvaluatorFloat {
+class FixedPointEvaluatorSingle {
 public:
   /**
    * @brief Constructor
-   *
-   * @param K Strike price
-   * @param r Risk-free interest rate
-   * @param q Dividend yield
-   * @param vol Volatility
-   * @param B Boundary function
-   * @param integrator Integrator for fixed point calculations
    */
-  FixedPointEvaluatorFloat(float K, float r, float q, float vol,
-                           const std::function<float(float)> &B,
-                           std::shared_ptr<num::IntegratorFloat> integrator);
+  FixedPointEvaluatorSingle(float K, float r, float q, float vol,
+                            const std::function<float(float)> &B,
+                            std::shared_ptr<num::IntegratorFloat> integrator);
 
   /**
    * @brief Destructor
    */
-  virtual ~FixedPointEvaluatorFloat() = default;
+  virtual ~FixedPointEvaluatorSingle() = default;
 
   /**
    * @brief Evaluate the fixed point equation
-   *
-   * @param tau Time to maturity
-   * @param b Boundary value
-   * @return Tuple of (N, D, f(b)) where f(b) is the fixed point equation value
    */
   virtual std::tuple<float, float, float> evaluate(float tau,
                                                    float b) const = 0;
 
   /**
    * @brief Calculate derivatives of the fixed point equation
-   *
-   * @param tau Time to maturity
-   * @param b Boundary value
-   * @return Pair of (N', D') derivatives
    */
   virtual std::pair<float, float> derivatives(float tau, float b) const = 0;
 
 protected:
   /**
    * @brief Calculate d1 and d2 terms for Black-Scholes
-   *
-   * @param t Time
-   * @param z Price ratio
-   * @return Pair of (d1, d2)
    */
   std::pair<float, float> d(float t, float z) const;
 
   /**
    * @brief Calculate normal CDF using fast approximation
-   *
-   * @param x Input value
-   * @return Normal CDF at x
    */
   float normalCDF(float x) const;
 
   /**
    * @brief Calculate normal PDF using fast approximation
-   *
-   * @param x Input value
-   * @return Normal PDF at x
    */
   float normalPDF(float x) const;
 
@@ -747,17 +467,17 @@ protected:
 };
 
 /**
- * @class EquationAFloat
+ * @class EquationASingle
  * @brief Single-precision implementation of Equation A from the ALO paper
  */
-class EquationAFloat : public FixedPointEvaluatorFloat {
+class EquationASingle : public FixedPointEvaluatorSingle {
 public:
   /**
    * @brief Constructor
    */
-  EquationAFloat(float K, float r, float q, float vol,
-                 const std::function<float(float)> &B,
-                 std::shared_ptr<num::IntegratorFloat> integrator);
+  EquationASingle(float K, float r, float q, float vol,
+                  const std::function<float(float)> &B,
+                  std::shared_ptr<num::IntegratorFloat> integrator);
 
   /**
    * @brief Evaluate the fixed point equation
@@ -771,17 +491,17 @@ public:
 };
 
 /**
- * @class EquationBFloat
+ * @class EquationBSingle
  * @brief Single-precision implementation of Equation B from the ALO paper
  */
-class EquationBFloat : public FixedPointEvaluatorFloat {
+class EquationBSingle : public FixedPointEvaluatorSingle {
 public:
   /**
    * @brief Constructor
    */
-  EquationBFloat(float K, float r, float q, float vol,
-                 const std::function<float(float)> &B,
-                 std::shared_ptr<num::IntegratorFloat> integrator);
+  EquationBSingle(float K, float r, float q, float vol,
+                  const std::function<float(float)> &B,
+                  std::shared_ptr<num::IntegratorFloat> integrator);
 
   /**
    * @brief Evaluate the fixed point equation
@@ -797,7 +517,7 @@ public:
 /**
  * @brief Create a single-precision fixed point evaluator
  */
-std::shared_ptr<FixedPointEvaluatorFloat> createFixedPointEvaluatorFloat(
+std::shared_ptr<FixedPointEvaluatorSingle> createFixedPointEvaluatorSingle(
     char equation, float K, float r, float q, float vol,
     const std::function<float(float)> &B,
     std::shared_ptr<num::IntegratorFloat> integrator);
