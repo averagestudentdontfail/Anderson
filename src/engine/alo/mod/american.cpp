@@ -9,17 +9,17 @@ namespace engine {
 namespace alo {
 namespace mod {
 
-AmericanOption::AmericanOption(std::shared_ptr<num::Integrator> integrator)
+AmericanOptionDouble::AmericanOptionDouble(std::shared_ptr<num::Integrator> integrator)
     : integrator_(integrator) {
   if (!integrator_) {
-    throw std::invalid_argument("AmericanOption: Integrator cannot be null");
+    throw std::invalid_argument("AmericanOptionDouble: Integrator cannot be null");
   }
 }
 
-AmericanPut::AmericanPut(std::shared_ptr<num::Integrator> integrator)
-    : AmericanOption(integrator) {}
+AmericanPutDouble::AmericanPutDouble(std::shared_ptr<num::Integrator> integrator)
+    : AmericanOptionDouble(integrator) {}
 
-double AmericanPut::xMax(double K, double r, double q) const {
+double AmericanPutDouble::xMax(double K, double r, double q) const {
   // Table 2 from the ALO paper for puts
   if (r > 0.0 && q > 0.0)
     return K * std::min(1.0, r / q);
@@ -39,13 +39,13 @@ double AmericanPut::xMax(double K, double r, double q) const {
     throw std::runtime_error("Internal error in xMax calculation for put");
 }
 
-double AmericanPut::calculateEarlyExercisePremium(
+double AmericanPutDouble::calculateEarlyExercisePremium(
     double S, double K, double r, double q, double vol, double T,
     const std::shared_ptr<num::ChebyshevInterpolation> &boundary) const {
 
   if (!boundary) {
     throw std::invalid_argument(
-        "AmericanPut: Boundary interpolation cannot be null");
+        "AmericanPutDouble: Boundary interpolation cannot be null");
   }
 
   const double xmax = xMax(K, r, q);
@@ -97,14 +97,14 @@ double AmericanPut::calculateEarlyExercisePremium(
 }
 
 std::shared_ptr<num::ChebyshevInterpolation>
-AmericanPut::calculateExerciseBoundary(
+AmericanPutDouble::calculateExerciseBoundary(
     double S, double K, double r, double q, double vol, double T,
     size_t num_nodes, size_t num_iterations,
     std::shared_ptr<num::Integrator> fpIntegrator) const {
 
   if (!fpIntegrator) {
     throw std::invalid_argument(
-        "AmericanPut: Fixed point integrator cannot be null");
+        "AmericanPutDouble: Fixed point integrator cannot be null");
   }
 
   const double xmax = xMax(K, r, q);
@@ -143,7 +143,7 @@ AmericanPut::calculateExerciseBoundary(
 
   // Create fixed point evaluator
   auto evaluator =
-      createFixedPointEvaluator('A', K, r, q, vol, B, fpIntegrator);
+      createFixedPointEvaluatorDouble('A', K, r, q, vol, B, fpIntegrator);
 
   // Perform fixed point iterations
   // First is a Jacobi-Newton step
@@ -194,10 +194,10 @@ AmericanPut::calculateExerciseBoundary(
   return interp;
 }
 
-AmericanCall::AmericanCall(std::shared_ptr<num::Integrator> integrator)
-    : AmericanOption(integrator) {}
+AmericanCallDouble::AmericanCallDouble(std::shared_ptr<num::Integrator> integrator)
+    : AmericanOptionDouble(integrator) {}
 
-double AmericanCall::xMax(double K, double r, double q) const {
+double AmericanCallDouble::xMax(double K, double r, double q) const {
   // For call options, the early exercise boundary is different
   if (q > 0.0 && r >= 0.0)
     return K * std::max(1.0, r / q);
@@ -212,13 +212,13 @@ double AmericanCall::xMax(double K, double r, double q) const {
     throw std::runtime_error("Internal error in xMax calculation for call");
 }
 
-double AmericanCall::calculateEarlyExercisePremium(
+double AmericanCallDouble::calculateEarlyExercisePremium(
     double S, double K, double r, double q, double vol, double T,
     const std::shared_ptr<num::ChebyshevInterpolation> &boundary) const {
 
   if (!boundary) {
     throw std::invalid_argument(
-        "AmericanCall: Boundary interpolation cannot be null");
+        "AmericanCallDouble: Boundary interpolation cannot be null");
   }
 
   // If zero dividend, calls should never be exercised early
@@ -280,14 +280,14 @@ double AmericanCall::calculateEarlyExercisePremium(
 }
 
 std::shared_ptr<num::ChebyshevInterpolation>
-AmericanCall::calculateExerciseBoundary(
+AmericanCallDouble::calculateExerciseBoundary(
     double S, double K, double r, double q, double vol, double T,
     size_t num_nodes, size_t num_iterations,
     std::shared_ptr<num::Integrator> fpIntegrator) const {
 
   if (!fpIntegrator) {
     throw std::invalid_argument(
-        "AmericanCall: Fixed point integrator cannot be null");
+        "AmericanCallDouble: Fixed point integrator cannot be null");
   }
 
   const double xmax = xMax(K, r, q);
@@ -339,7 +339,7 @@ AmericanCall::calculateExerciseBoundary(
 
   // For calls, we swap r and q in the fixed point equation (put-call symmetry)
   auto evaluator =
-      createFixedPointEvaluator('A', K, q, r, vol, B, fpIntegrator);
+      createFixedPointEvaluatorDouble('A', K, q, r, vol, B, fpIntegrator);
 
   // Perform fixed point iterations
   // First is a Jacobi-Newton step
@@ -390,14 +390,14 @@ AmericanCall::calculateExerciseBoundary(
   return interp;
 }
 
-FixedPointEvaluator::FixedPointEvaluator(
+FixedPointEvaluatorDouble::FixedPointEvaluatorDouble(
     double K, double r, double q, double vol,
     const std::function<double(double)> &B,
     std::shared_ptr<num::Integrator> integrator)
     : K_(K), r_(r), q_(q), vol_(vol), vol2_(vol * vol), B_(B),
       integrator_(integrator) {}
 
-std::pair<double, double> FixedPointEvaluator::d(double t, double z) const {
+std::pair<double, double> FixedPointEvaluatorDouble::d(double t, double z) const {
   if (t <= 0.0 || z <= 0.0) {
     return {-std::numeric_limits<double>::infinity(),
             -std::numeric_limits<double>::infinity()};
@@ -409,21 +409,21 @@ std::pair<double, double> FixedPointEvaluator::d(double t, double z) const {
   return {m, m - v};
 }
 
-double FixedPointEvaluator::normalCDF(double x) const {
+double FixedPointEvaluatorDouble::normalCDF(double x) const {
   // Using standard error function implementation
   return 0.5 * (1.0 + std::erf(x / std::sqrt(2.0)));
 }
 
-double FixedPointEvaluator::normalPDF(double x) const {
+double FixedPointEvaluatorDouble::normalPDF(double x) const {
   return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
 }
 
-EquationA::EquationA(double K, double r, double q, double vol,
+EquationADouble::EquationADouble(double K, double r, double q, double vol,
                      const std::function<double(double)> &B,
                      std::shared_ptr<num::Integrator> integrator)
-    : FixedPointEvaluator(K, r, q, vol, B, integrator) {}
+    : FixedPointEvaluatorDouble(K, r, q, vol, B, integrator) {}
 
-std::tuple<double, double, double> EquationA::evaluate(double tau,
+std::tuple<double, double, double> EquationADouble::evaluate(double tau,
                                                        double b) const {
   double N, D;
   const double eps = 1e-10;
@@ -502,7 +502,7 @@ std::tuple<double, double, double> EquationA::evaluate(double tau,
   return {N, D, fv};
 }
 
-std::pair<double, double> EquationA::derivatives(double tau, double b) const {
+std::pair<double, double> EquationADouble::derivatives(double tau, double b) const {
   double Nd, Dd;
   const double eps = 1e-10;
 
@@ -528,12 +528,12 @@ std::pair<double, double> EquationA::derivatives(double tau, double b) const {
   return {Nd, Dd};
 }
 
-EquationB::EquationB(double K, double r, double q, double vol,
+EquationBDouble::EquationBDouble(double K, double r, double q, double vol,
                      const std::function<double(double)> &B,
                      std::shared_ptr<num::Integrator> integrator)
-    : FixedPointEvaluator(K, r, q, vol, B, integrator) {}
+    : FixedPointEvaluatorDouble(K, r, q, vol, B, integrator) {}
 
-std::tuple<double, double, double> EquationB::evaluate(double tau,
+std::tuple<double, double, double> EquationBDouble::evaluate(double tau,
                                                        double b) const {
   double N, D;
   const double eps = 1e-10;
@@ -605,7 +605,7 @@ std::tuple<double, double, double> EquationB::evaluate(double tau,
   return {N, D, fv};
 }
 
-std::pair<double, double> EquationB::derivatives(double tau, double b) const {
+std::pair<double, double> EquationBDouble::derivatives(double tau, double b) const {
   const double eps = 1e-10;
 
   if (tau < eps * eps) {
@@ -618,40 +618,40 @@ std::pair<double, double> EquationB::derivatives(double tau, double b) const {
           normalPDF(dpm.first) / (b * vol_ * std::sqrt(tau))};
 }
 
-std::shared_ptr<FixedPointEvaluator>
-createFixedPointEvaluator(char equation, double K, double r, double q,
+std::shared_ptr<FixedPointEvaluatorDouble>
+createFixedPointEvaluatorDouble(char equation, double K, double r, double q,
                           double vol, const std::function<double(double)> &B,
                           std::shared_ptr<num::Integrator> integrator) {
 
   if (equation == 'A') {
-    return std::make_shared<EquationA>(K, r, q, vol, B, integrator);
+    return std::make_shared<EquationADouble>(K, r, q, vol, B, integrator);
   } else if (equation == 'B') {
-    return std::make_shared<EquationB>(K, r, q, vol, B, integrator);
+    return std::make_shared<EquationBDouble>(K, r, q, vol, B, integrator);
   } else {
     // Auto-select equation based on r and q
     if (std::abs(r - q) < 0.001) {
-      return std::make_shared<EquationA>(K, r, q, vol, B, integrator);
+      return std::make_shared<EquationADouble>(K, r, q, vol, B, integrator);
     } else {
-      return std::make_shared<EquationB>(K, r, q, vol, B, integrator);
+      return std::make_shared<EquationBDouble>(K, r, q, vol, B, integrator);
     }
   }
 }
 
-AmericanOptionFloat::AmericanOptionFloat(
+AmericanOptionSingle::AmericanOptionSingle(
     std::shared_ptr<num::IntegratorFloat> integrator)
     : integrator_(integrator) {
   if (!integrator_) {
     throw std::invalid_argument(
-        "AmericanOptionFloat: Integrator cannot be null");
+        "AmericanOptionSingle: Integrator cannot be null");
   }
 }
 
-// AmericanPutFloat implementation
-AmericanPutFloat::AmericanPutFloat(
+// AmericanPutSingle implementation
+AmericanPutSingle::AmericanPutSingle(
     std::shared_ptr<num::IntegratorFloat> integrator)
-    : AmericanOptionFloat(integrator) {}
+    : AmericanOptionSingle(integrator) {}
 
-float AmericanPutFloat::xMax(float K, float r, float q) const {
+float AmericanPutSingle::xMax(float K, float r, float q) const {
   // Table 2 from the ALO paper for puts
   if (r > 0.0f && q > 0.0f)
     return K * std::min(1.0f, r / q);
@@ -671,13 +671,13 @@ float AmericanPutFloat::xMax(float K, float r, float q) const {
     throw std::runtime_error("Internal error in xMax calculation for put");
 }
 
-float AmericanPutFloat::calculateEarlyExercisePremium(
+float AmericanPutSingle::calculateEarlyExercisePremium(
     float S, float K, float r, float q, float vol, float T,
     const std::shared_ptr<num::ChebyshevInterpolationFloat> &boundary) const {
 
   if (!boundary) {
     throw std::invalid_argument(
-        "AmericanPutFloat: Boundary interpolation cannot be null");
+        "AmericanPutSingle: Boundary interpolation cannot be null");
   }
 
   const float xmax = xMax(K, r, q);
@@ -730,14 +730,14 @@ float AmericanPutFloat::calculateEarlyExercisePremium(
 }
 
 std::shared_ptr<num::ChebyshevInterpolationFloat>
-AmericanPutFloat::calculateExerciseBoundary(
+AmericanPutSingle::calculateExerciseBoundary(
     float S, float K, float r, float q, float vol, float T, size_t num_nodes,
     size_t num_iterations,
     std::shared_ptr<num::IntegratorFloat> fpIntegrator) const {
 
   if (!fpIntegrator) {
     throw std::invalid_argument(
-        "AmericanPutFloat: Fixed point integrator cannot be null");
+        "AmericanPutSingle: Fixed point integrator cannot be null");
   }
 
   const float xmax = xMax(K, r, q);
@@ -777,7 +777,7 @@ AmericanPutFloat::calculateExerciseBoundary(
 
   // Create fixed point evaluator
   auto evaluator =
-      createFixedPointEvaluatorFloat('A', K, r, q, vol, B, fpIntegrator);
+      createFixedPointEvaluatorSingle('A', K, r, q, vol, B, fpIntegrator);
 
   // Perform fixed point iterations
   // First is a Jacobi-Newton step
@@ -828,12 +828,12 @@ AmericanPutFloat::calculateExerciseBoundary(
   return interp;
 }
 
-float AmericanPutFloat::approximatePrice(float S, float K, float r, float q,
+float AmericanPutSingle::approximatePrice(float S, float K, float r, float q,
                                          float vol, float T) const {
   // Barone-Adesi-Whaley approximation for American put options
 
   // Calculate European put price
-  EuropeanPutFloat euro_put;
+  EuropeanPutSingle euro_put;
   float euro_price = euro_put.calculatePrice(S, K, r, q, vol, T);
 
   // If deep out-of-the-money or very short time to expiry, use European price
@@ -867,7 +867,7 @@ float AmericanPutFloat::approximatePrice(float S, float K, float r, float q,
   return euro_price + alpha * std::pow(S / S_star, -q2);
 }
 
-std::vector<float> AmericanPutFloat::batchApproximatePrice(
+std::vector<float> AmericanPutSingle::batchApproximatePrice(
     float S, const std::vector<float> &strikes, float r, float q, float vol,
     float T) const {
 
@@ -900,12 +900,12 @@ std::vector<float> AmericanPutFloat::batchApproximatePrice(
   return results;
 }
 
-// AmericanCallFloat implementation
-AmericanCallFloat::AmericanCallFloat(
+// AmericanCallSingle implementation
+AmericanCallSingle::AmericanCallSingle(
     std::shared_ptr<num::IntegratorFloat> integrator)
-    : AmericanOptionFloat(integrator) {}
+    : AmericanOptionSingle(integrator) {}
 
-float AmericanCallFloat::xMax(float K, float r, float q) const {
+float AmericanCallSingle::xMax(float K, float r, float q) const {
   // For call options, the early exercise boundary is different
   if (q > 0.0f && r >= 0.0f)
     return K * std::max(1.0f, r / q);
@@ -920,13 +920,13 @@ float AmericanCallFloat::xMax(float K, float r, float q) const {
     throw std::runtime_error("Internal error in xMax calculation for call");
 }
 
-float AmericanCallFloat::calculateEarlyExercisePremium(
+float AmericanCallSingle::calculateEarlyExercisePremium(
     float S, float K, float r, float q, float vol, float T,
     const std::shared_ptr<num::ChebyshevInterpolationFloat> &boundary) const {
 
   if (!boundary) {
     throw std::invalid_argument(
-        "AmericanCallFloat: Boundary interpolation cannot be null");
+        "AmericanCallSingle: Boundary interpolation cannot be null");
   }
 
   // If zero dividend, calls should never be exercised early
@@ -989,14 +989,14 @@ float AmericanCallFloat::calculateEarlyExercisePremium(
 }
 
 std::shared_ptr<num::ChebyshevInterpolationFloat>
-AmericanCallFloat::calculateExerciseBoundary(
+AmericanCallSingle::calculateExerciseBoundary(
     float S, float K, float r, float q, float vol, float T, size_t num_nodes,
     size_t num_iterations,
     std::shared_ptr<num::IntegratorFloat> fpIntegrator) const {
 
   if (!fpIntegrator) {
     throw std::invalid_argument(
-        "AmericanCallFloat: Fixed point integrator cannot be null");
+        "AmericanCallSingle: Fixed point integrator cannot be null");
   }
 
   const float xmax = xMax(K, r, q);
@@ -1049,7 +1049,7 @@ AmericanCallFloat::calculateExerciseBoundary(
 
   // For calls, we swap r and q in the fixed point equation (put-call symmetry)
   auto evaluator =
-      createFixedPointEvaluatorFloat('A', K, q, r, vol, B, fpIntegrator);
+      createFixedPointEvaluatorSingle('A', K, q, r, vol, B, fpIntegrator);
 
   // Perform fixed point iterations
   // First is a Jacobi-Newton step
@@ -1100,18 +1100,18 @@ AmericanCallFloat::calculateExerciseBoundary(
   return interp;
 }
 
-float AmericanCallFloat::approximatePrice(float S, float K, float r, float q,
+float AmericanCallSingle::approximatePrice(float S, float K, float r, float q,
                                           float vol, float T) const {
   // For zero dividend, use European price
   if (q <= 0.0f) {
-    EuropeanCallFloat euro_call;
+    EuropeanCallSingle euro_call;
     return euro_call.calculatePrice(S, K, r, q, vol, T);
   }
 
   // Barone-Adesi-Whaley approximation for American call options
 
   // Calculate European call price
-  EuropeanCallFloat euro_call;
+  EuropeanCallSingle euro_call;
   float euro_price = euro_call.calculatePrice(S, K, r, q, vol, T);
 
   // If deep out-of-the-money or very short time to expiry, use European price
@@ -1145,7 +1145,7 @@ float AmericanCallFloat::approximatePrice(float S, float K, float r, float q,
   return euro_price + alpha * std::pow(S / S_star, q1);
 }
 
-std::vector<float> AmericanCallFloat::batchApproximatePrice(
+std::vector<float> AmericanCallSingle::batchApproximatePrice(
     float S, const std::vector<float> &strikes, float r, float q, float vol,
     float T) const {
 
@@ -1178,14 +1178,14 @@ std::vector<float> AmericanCallFloat::batchApproximatePrice(
   return results;
 }
 
-// FixedPointEvaluatorFloat implementation
-FixedPointEvaluatorFloat::FixedPointEvaluatorFloat(
+// FixedPointEvaluatorSingle implementation
+FixedPointEvaluatorSingle::FixedPointEvaluatorSingle(
     float K, float r, float q, float vol, const std::function<float(float)> &B,
     std::shared_ptr<num::IntegratorFloat> integrator)
     : K_(K), r_(r), q_(q), vol_(vol), vol2_(vol * vol), B_(B),
       integrator_(integrator) {}
 
-std::pair<float, float> FixedPointEvaluatorFloat::d(float t, float z) const {
+std::pair<float, float> FixedPointEvaluatorSingle::d(float t, float z) const {
   if (t <= 0.0f || z <= 0.0f) {
     return {-std::numeric_limits<float>::infinity(),
             -std::numeric_limits<float>::infinity()};
@@ -1197,22 +1197,22 @@ std::pair<float, float> FixedPointEvaluatorFloat::d(float t, float z) const {
   return {m, m - v};
 }
 
-float FixedPointEvaluatorFloat::normalCDF(float x) const {
+float FixedPointEvaluatorSingle::normalCDF(float x) const {
   // Using optimized error function implementation
   return 0.5f * (1.0f + num::fast_erf(x / 1.414213562f));
 }
 
-float FixedPointEvaluatorFloat::normalPDF(float x) const {
+float FixedPointEvaluatorSingle::normalPDF(float x) const {
   return num::fast_normal_pdf(x);
 }
 
-// EquationAFloat implementation
-EquationAFloat::EquationAFloat(float K, float r, float q, float vol,
+// EquationASingle implementation
+EquationASingle::EquationASingle(float K, float r, float q, float vol,
                                const std::function<float(float)> &B,
                                std::shared_ptr<num::IntegratorFloat> integrator)
-    : FixedPointEvaluatorFloat(K, r, q, vol, B, integrator) {}
+    : FixedPointEvaluatorSingle(K, r, q, vol, B, integrator) {}
 
-std::tuple<float, float, float> EquationAFloat::evaluate(float tau,
+std::tuple<float, float, float> EquationASingle::evaluate(float tau,
                                                          float b) const {
   float N, D;
   const float eps = 1e-5f;
@@ -1291,7 +1291,7 @@ std::tuple<float, float, float> EquationAFloat::evaluate(float tau,
   return {N, D, fv};
 }
 
-std::pair<float, float> EquationAFloat::derivatives(float tau, float b) const {
+std::pair<float, float> EquationASingle::derivatives(float tau, float b) const {
   float Nd, Dd;
   const float eps = 1e-5f;
 
@@ -1317,13 +1317,13 @@ std::pair<float, float> EquationAFloat::derivatives(float tau, float b) const {
   return {Nd, Dd};
 }
 
-// EquationBFloat implementation
-EquationBFloat::EquationBFloat(float K, float r, float q, float vol,
+// EquationBSingle implementation
+EquationBSingle::EquationBSingle(float K, float r, float q, float vol,
                                const std::function<float(float)> &B,
                                std::shared_ptr<num::IntegratorFloat> integrator)
-    : FixedPointEvaluatorFloat(K, r, q, vol, B, integrator) {}
+    : FixedPointEvaluatorSingle(K, r, q, vol, B, integrator) {}
 
-std::tuple<float, float, float> EquationBFloat::evaluate(float tau,
+std::tuple<float, float, float> EquationBSingle::evaluate(float tau,
                                                          float b) const {
   float N, D;
   const float eps = 1e-5f;
@@ -1395,7 +1395,7 @@ std::tuple<float, float, float> EquationBFloat::evaluate(float tau,
   return {N, D, fv};
 }
 
-std::pair<float, float> EquationBFloat::derivatives(float tau, float b) const {
+std::pair<float, float> EquationBSingle::derivatives(float tau, float b) const {
   const float eps = 1e-5f;
 
   if (tau < eps * eps) {
@@ -1408,21 +1408,21 @@ std::pair<float, float> EquationBFloat::derivatives(float tau, float b) const {
           normalPDF(dpm.first) / (b * vol_ * std::sqrt(tau))};
 }
 
-std::shared_ptr<FixedPointEvaluatorFloat> createFixedPointEvaluatorFloat(
+std::shared_ptr<FixedPointEvaluatorSingle> createFixedPointEvaluatorSingle(
     char equation, float K, float r, float q, float vol,
     const std::function<float(float)> &B,
     std::shared_ptr<num::IntegratorFloat> integrator) {
 
   if (equation == 'A') {
-    return std::make_shared<EquationAFloat>(K, r, q, vol, B, integrator);
+    return std::make_shared<EquationASingle>(K, r, q, vol, B, integrator);
   } else if (equation == 'B') {
-    return std::make_shared<EquationBFloat>(K, r, q, vol, B, integrator);
+    return std::make_shared<EquationBSingle>(K, r, q, vol, B, integrator);
   } else {
     // Auto-select equation based on r and q
     if (std::abs(r - q) < 0.001f) {
-      return std::make_shared<EquationAFloat>(K, r, q, vol, B, integrator);
+      return std::make_shared<EquationASingle>(K, r, q, vol, B, integrator);
     } else {
-      return std::make_shared<EquationBFloat>(K, r, q, vol, B, integrator);
+      return std::make_shared<EquationBSingle>(K, r, q, vol, B, integrator);
     }
   }
 }

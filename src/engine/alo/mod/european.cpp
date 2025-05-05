@@ -8,7 +8,7 @@ namespace engine {
 namespace alo {
 namespace mod {
 
-double EuropeanOption::d1(double S, double K, double r, double q, double vol,
+double EuropeanOptionDouble::d1(double S, double K, double r, double q, double vol,
                           double T) {
   if (vol <= 0.0 || T <= 0.0) {
     throw std::domain_error("Invalid parameters: vol and T must be positive");
@@ -18,19 +18,19 @@ double EuropeanOption::d1(double S, double K, double r, double q, double vol,
          (vol * std::sqrt(T));
 }
 
-double EuropeanOption::d2(double d1, double vol, double T) {
+double EuropeanOptionDouble::d2(double d1, double vol, double T) {
   return d1 - vol * std::sqrt(T);
 }
 
-double EuropeanOption::normalCDF(double x) {
+double EuropeanOptionDouble::normalCDF(double x) {
   return 0.5 * (1.0 + std::erf(x / std::sqrt(2.0)));
 }
 
-double EuropeanOption::normalPDF(double x) {
+double EuropeanOptionDouble::normalPDF(double x) {
   return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
 }
 
-double EuropeanPut::calculatePrice(double S, double K, double r, double q,
+double EuropeanPutDouble::calculatePrice(double S, double K, double r, double q,
                                    double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -48,7 +48,7 @@ double EuropeanPut::calculatePrice(double S, double K, double r, double q,
   return K * std::exp(-r * T) * Nd2 - S * std::exp(-q * T) * Nd1;
 }
 
-double EuropeanPut::calculateDelta(double S, double K, double r, double q,
+double EuropeanPutDouble::calculateDelta(double S, double K, double r, double q,
                                    double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -62,7 +62,7 @@ double EuropeanPut::calculateDelta(double S, double K, double r, double q,
   return std::exp(-q * T) * (normalCDF(d1_val) - 1.0);
 }
 
-double EuropeanPut::calculateGamma(double S, double K, double r, double q,
+double EuropeanPutDouble::calculateGamma(double S, double K, double r, double q,
                                    double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -76,7 +76,7 @@ double EuropeanPut::calculateGamma(double S, double K, double r, double q,
   return std::exp(-q * T) * normalPDF(d1_val) / (S * vol * std::sqrt(T));
 }
 
-double EuropeanPut::calculateVega(double S, double K, double r, double q,
+double EuropeanPutDouble::calculateVega(double S, double K, double r, double q,
                                   double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -90,7 +90,7 @@ double EuropeanPut::calculateVega(double S, double K, double r, double q,
   return 0.01 * S * std::exp(-q * T) * normalPDF(d1_val) * std::sqrt(T);
 }
 
-double EuropeanPut::calculateTheta(double S, double K, double r, double q,
+double EuropeanPutDouble::calculateTheta(double S, double K, double r, double q,
                                    double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -110,7 +110,7 @@ double EuropeanPut::calculateTheta(double S, double K, double r, double q,
   return (term1 + term2 + term3) / 365.0;
 }
 
-double EuropeanPut::calculateRho(double S, double K, double r, double q,
+double EuropeanPutDouble::calculateRho(double S, double K, double r, double q,
                                  double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -126,7 +126,7 @@ double EuropeanPut::calculateRho(double S, double K, double r, double q,
 }
 
 std::vector<double>
-EuropeanPut::batchCalculatePrice(double S, const std::vector<double> &strikes,
+EuropeanPutDouble::batchCalculatePrice(double S, const std::vector<double> &strikes,
                                  double r, double q, double vol,
                                  double T) const {
   // Return empty vector for empty input
@@ -170,7 +170,7 @@ EuropeanPut::batchCalculatePrice(double S, const std::vector<double> &strikes,
   return results;
 }
 
-std::array<double, 4> EuropeanPut::calculatePrice4(
+std::array<double, 4> EuropeanPutDouble::calculatePrice4(
     const std::array<double, 4> &spots, const std::array<double, 4> &strikes,
     const std::array<double, 4> &rs, const std::array<double, 4> &qs,
     const std::array<double, 4> &vols, const std::array<double, 4> &Ts) const {
@@ -214,7 +214,7 @@ std::array<double, 4> EuropeanPut::calculatePrice4(
   return results;
 }
 
-double EuropeanCall::calculatePrice(double S, double K, double r, double q,
+double EuropeanCallDouble::calculatePrice(double S, double K, double r, double q,
                                     double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -232,7 +232,7 @@ double EuropeanCall::calculatePrice(double S, double K, double r, double q,
   return S * std::exp(-q * T) * Nd1 - K * std::exp(-r * T) * Nd2;
 }
 
-double EuropeanCall::calculateDelta(double S, double K, double r, double q,
+double EuropeanCallDouble::calculateDelta(double S, double K, double r, double q,
                                     double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -246,7 +246,7 @@ double EuropeanCall::calculateDelta(double S, double K, double r, double q,
   return std::exp(-q * T) * normalCDF(d1_val);
 }
 
-double EuropeanCall::calculateGamma(double S, double K, double r, double q,
+double EuropeanCallDouble::calculateGamma(double S, double K, double r, double q,
                                     double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -260,7 +260,7 @@ double EuropeanCall::calculateGamma(double S, double K, double r, double q,
   return std::exp(-q * T) * normalPDF(d1_val) / (S * vol * std::sqrt(T));
 }
 
-double EuropeanCall::calculateVega(double S, double K, double r, double q,
+double EuropeanCallDouble::calculateVega(double S, double K, double r, double q,
                                    double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -274,7 +274,7 @@ double EuropeanCall::calculateVega(double S, double K, double r, double q,
   return 0.01 * S * std::exp(-q * T) * normalPDF(d1_val) * std::sqrt(T);
 }
 
-double EuropeanCall::calculateTheta(double S, double K, double r, double q,
+double EuropeanCallDouble::calculateTheta(double S, double K, double r, double q,
                                     double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -294,7 +294,7 @@ double EuropeanCall::calculateTheta(double S, double K, double r, double q,
   return (term1 + term2 + term3) / 365.0;
 }
 
-double EuropeanCall::calculateRho(double S, double K, double r, double q,
+double EuropeanCallDouble::calculateRho(double S, double K, double r, double q,
                                   double vol, double T) const {
   // Handle special cases
   if (vol <= 0.0 || T <= 0.0) {
@@ -310,7 +310,7 @@ double EuropeanCall::calculateRho(double S, double K, double r, double q,
 }
 
 std::vector<double>
-EuropeanCall::batchCalculatePrice(double S, const std::vector<double> &strikes,
+EuropeanCallDouble::batchCalculatePrice(double S, const std::vector<double> &strikes,
                                   double r, double q, double vol,
                                   double T) const {
   // Return empty vector for empty input
@@ -354,7 +354,7 @@ EuropeanCall::batchCalculatePrice(double S, const std::vector<double> &strikes,
   return results;
 }
 
-std::array<double, 4> EuropeanCall::calculatePrice4(
+std::array<double, 4> EuropeanCallDouble::calculatePrice4(
     const std::array<double, 4> &spots, const std::array<double, 4> &strikes,
     const std::array<double, 4> &rs, const std::array<double, 4> &qs,
     const std::array<double, 4> &vols, const std::array<double, 4> &Ts) const {
@@ -398,7 +398,7 @@ std::array<double, 4> EuropeanCall::calculatePrice4(
   return results;
 }
 
-double putCallParity(bool isPut, double price, double S, double K, double r,
+double putCallParityDouble(bool isPut, double price, double S, double K, double r,
                      double q, double T) {
   double pv_K = K * std::exp(-r * T); // Present value of strike
   double pv_S = S * std::exp(-q * T); // Present value of spot with dividends
@@ -412,7 +412,7 @@ double putCallParity(bool isPut, double price, double S, double K, double r,
   }
 }
 
-float EuropeanOptionFloat::d1(float S, float K, float r, float q, float vol,
+float EuropeanOptionSingle::d1(float S, float K, float r, float q, float vol,
                               float T) {
   if (vol <= 0.0f || T <= 0.0f) {
     throw std::domain_error("Invalid parameters: vol and T must be positive");
@@ -422,20 +422,20 @@ float EuropeanOptionFloat::d1(float S, float K, float r, float q, float vol,
          (vol * std::sqrt(T));
 }
 
-float EuropeanOptionFloat::d2(float d1, float vol, float T) {
+float EuropeanOptionSingle::d2(float d1, float vol, float T) {
   return d1 - vol * std::sqrt(T);
 }
 
-float EuropeanOptionFloat::normalCDF(float x) {
+float EuropeanOptionSingle::normalCDF(float x) {
   return num::fast_normal_cdf(x);
 }
 
-float EuropeanOptionFloat::normalPDF(float x) {
+float EuropeanOptionSingle::normalPDF(float x) {
   return num::fast_normal_pdf(x);
 }
 
-// EuropeanPutFloat implementation
-float EuropeanPutFloat::calculatePrice(float S, float K, float r, float q,
+// EuropeanPutSingle implementation
+float EuropeanPutSingle::calculatePrice(float S, float K, float r, float q,
                                        float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -453,7 +453,7 @@ float EuropeanPutFloat::calculatePrice(float S, float K, float r, float q,
   return K * std::exp(-r * T) * Nd2 - S * std::exp(-q * T) * Nd1;
 }
 
-float EuropeanPutFloat::calculateDelta(float S, float K, float r, float q,
+float EuropeanPutSingle::calculateDelta(float S, float K, float r, float q,
                                        float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -467,7 +467,7 @@ float EuropeanPutFloat::calculateDelta(float S, float K, float r, float q,
   return std::exp(-q * T) * (normalCDF(d1_val) - 1.0f);
 }
 
-float EuropeanPutFloat::calculateGamma(float S, float K, float r, float q,
+float EuropeanPutSingle::calculateGamma(float S, float K, float r, float q,
                                        float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -481,7 +481,7 @@ float EuropeanPutFloat::calculateGamma(float S, float K, float r, float q,
   return std::exp(-q * T) * normalPDF(d1_val) / (S * vol * std::sqrt(T));
 }
 
-float EuropeanPutFloat::calculateVega(float S, float K, float r, float q,
+float EuropeanPutSingle::calculateVega(float S, float K, float r, float q,
                                       float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -495,7 +495,7 @@ float EuropeanPutFloat::calculateVega(float S, float K, float r, float q,
   return 0.01f * S * std::exp(-q * T) * normalPDF(d1_val) * std::sqrt(T);
 }
 
-float EuropeanPutFloat::calculateTheta(float S, float K, float r, float q,
+float EuropeanPutSingle::calculateTheta(float S, float K, float r, float q,
                                        float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -515,7 +515,7 @@ float EuropeanPutFloat::calculateTheta(float S, float K, float r, float q,
   return (term1 + term2 + term3) / 365.0f;
 }
 
-float EuropeanPutFloat::calculateRho(float S, float K, float r, float q,
+float EuropeanPutSingle::calculateRho(float S, float K, float r, float q,
                                      float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -530,7 +530,7 @@ float EuropeanPutFloat::calculateRho(float S, float K, float r, float q,
   return -0.01f * K * T * std::exp(-r * T) * normalCDF(-d2_val);
 }
 
-std::vector<float> EuropeanPutFloat::batchCalculatePrice(
+std::vector<float> EuropeanPutSingle::batchCalculatePrice(
     float S, const std::vector<float> &strikes, float r, float q, float vol,
     float T) const {
   // Return empty vector for empty input
@@ -576,7 +576,7 @@ std::vector<float> EuropeanPutFloat::batchCalculatePrice(
   return results;
 }
 
-std::array<float, 8> EuropeanPutFloat::calculatePrice8(
+std::array<float, 8> EuropeanPutSingle::calculatePrice8(
     const std::array<float, 8> &spots, const std::array<float, 8> &strikes,
     const std::array<float, 8> &rs, const std::array<float, 8> &qs,
     const std::array<float, 8> &vols, const std::array<float, 8> &Ts) const {
@@ -621,8 +621,8 @@ std::array<float, 8> EuropeanPutFloat::calculatePrice8(
   return results;
 }
 
-// EuropeanCallFloat implementation
-float EuropeanCallFloat::calculatePrice(float S, float K, float r, float q,
+// EuropeanCallSingle implementation
+float EuropeanCallSingle::calculatePrice(float S, float K, float r, float q,
                                         float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -640,7 +640,7 @@ float EuropeanCallFloat::calculatePrice(float S, float K, float r, float q,
   return S * std::exp(-q * T) * Nd1 - K * std::exp(-r * T) * Nd2;
 }
 
-float EuropeanCallFloat::calculateDelta(float S, float K, float r, float q,
+float EuropeanCallSingle::calculateDelta(float S, float K, float r, float q,
                                         float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -654,7 +654,7 @@ float EuropeanCallFloat::calculateDelta(float S, float K, float r, float q,
   return std::exp(-q * T) * normalCDF(d1_val);
 }
 
-float EuropeanCallFloat::calculateGamma(float S, float K, float r, float q,
+float EuropeanCallSingle::calculateGamma(float S, float K, float r, float q,
                                         float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -668,7 +668,7 @@ float EuropeanCallFloat::calculateGamma(float S, float K, float r, float q,
   return std::exp(-q * T) * normalPDF(d1_val) / (S * vol * std::sqrt(T));
 }
 
-float EuropeanCallFloat::calculateVega(float S, float K, float r, float q,
+float EuropeanCallSingle::calculateVega(float S, float K, float r, float q,
                                        float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -682,7 +682,7 @@ float EuropeanCallFloat::calculateVega(float S, float K, float r, float q,
   return 0.01f * S * std::exp(-q * T) * normalPDF(d1_val) * std::sqrt(T);
 }
 
-float EuropeanCallFloat::calculateTheta(float S, float K, float r, float q,
+float EuropeanCallSingle::calculateTheta(float S, float K, float r, float q,
                                         float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -702,7 +702,7 @@ float EuropeanCallFloat::calculateTheta(float S, float K, float r, float q,
   return (term1 + term2 + term3) / 365.0f;
 }
 
-float EuropeanCallFloat::calculateRho(float S, float K, float r, float q,
+float EuropeanCallSingle::calculateRho(float S, float K, float r, float q,
                                       float vol, float T) const {
   // Handle special cases
   if (vol <= 0.0f || T <= 0.0f) {
@@ -717,7 +717,7 @@ float EuropeanCallFloat::calculateRho(float S, float K, float r, float q,
   return 0.01f * K * T * std::exp(-r * T) * normalCDF(d2_val);
 }
 
-std::vector<float> EuropeanCallFloat::batchCalculatePrice(
+std::vector<float> EuropeanCallSingle::batchCalculatePrice(
     float S, const std::vector<float> &strikes, float r, float q, float vol,
     float T) const {
   // Return empty vector for empty input
@@ -763,7 +763,7 @@ std::vector<float> EuropeanCallFloat::batchCalculatePrice(
   return results;
 }
 
-std::array<float, 8> EuropeanCallFloat::calculatePrice8(
+std::array<float, 8> EuropeanCallSingle::calculatePrice8(
     const std::array<float, 8> &spots, const std::array<float, 8> &strikes,
     const std::array<float, 8> &rs, const std::array<float, 8> &qs,
     const std::array<float, 8> &vols, const std::array<float, 8> &Ts) const {
@@ -808,7 +808,7 @@ std::array<float, 8> EuropeanCallFloat::calculatePrice8(
   return results;
 }
 
-float putCallParityFloat(bool isPut, float price, float S, float K, float r,
+float putCallParitySingle(bool isPut, float price, float S, float K, float r,
                          float q, float T) {
   float pv_K = K * std::exp(-r * T); // Present value of strike
   float pv_S = S * std::exp(-q * T); // Present value of spot with dividends

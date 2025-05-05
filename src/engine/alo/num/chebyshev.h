@@ -2,7 +2,7 @@
 #define ENGINE_ALO_NUM_CHEBYSHEV_H
 
 #include <functional>
-#include <immintrin.h> 
+#include <immintrin.h>
 #include <memory>
 #include <vector>
 
@@ -19,13 +19,13 @@ enum ChebyshevKind {
 };
 
 /**
- * @brief Chebyshev polynomial interpolation
+ * @brief Double-precision Chebyshev polynomial interpolation
  *
  * This class implements Chebyshev polynomial interpolation for
  * representing functions with high accuracy, particularly the
  * early exercise boundary in American option pricing.
  */
-class ChebyshevInterpolation {
+class ChebyshevInterpolationDouble {
 public:
   /**
    * @brief Constructor from function
@@ -38,10 +38,11 @@ public:
    * @param domain_start Start of domain
    * @param domain_end End of domain
    */
-  ChebyshevInterpolation(size_t num_points,
-                         const std::function<double(double)> &func,
-                         ChebyshevKind kind = SECOND_KIND,
-                         double domain_start = -1.0, double domain_end = 1.0);
+  ChebyshevInterpolationDouble(size_t num_points,
+                               const std::function<double(double)> &func,
+                               ChebyshevKind kind = SECOND_KIND,
+                               double domain_start = -1.0,
+                               double domain_end = 1.0);
 
   /**
    * @brief Constructor from nodes and values
@@ -54,15 +55,16 @@ public:
    * @param domain_start Start of domain
    * @param domain_end End of domain
    */
-  ChebyshevInterpolation(const std::vector<double> &nodes,
-                         const std::vector<double> &values,
-                         ChebyshevKind kind = SECOND_KIND,
-                         double domain_start = -1.0, double domain_end = 1.0);
+  ChebyshevInterpolationDouble(const std::vector<double> &nodes,
+                               const std::vector<double> &values,
+                               ChebyshevKind kind = SECOND_KIND,
+                               double domain_start = -1.0,
+                               double domain_end = 1.0);
 
   /**
    * @brief Destructor
    */
-  ~ChebyshevInterpolation() = default;
+  ~ChebyshevInterpolationDouble() = default;
 
   /**
    * @brief Evaluate interpolation at a point
@@ -180,24 +182,25 @@ private:
 };
 
 /**
- * @brief SIMD-accelerated Chebyshev interpolation
+ * @brief SIMD-accelerated double-precision Chebyshev interpolation
  *
  * This class provides SIMD acceleration for evaluating Chebyshev
  * interpolation at multiple points simultaneously.
  */
-class SimdChebyshevInterpolation {
+class SimdChebyshevInterpolationDouble {
 public:
   /**
    * @brief Constructor from standard interpolation
    *
    * @param interp Base Chebyshev interpolation
    */
-  explicit SimdChebyshevInterpolation(const ChebyshevInterpolation &interp);
+  explicit SimdChebyshevInterpolationDouble(
+      const ChebyshevInterpolationDouble &interp);
 
   /**
    * @brief Destructor
    */
-  ~SimdChebyshevInterpolation() = default;
+  ~SimdChebyshevInterpolationDouble() = default;
 
   /**
    * @brief Evaluate interpolation at multiple points
@@ -219,11 +222,11 @@ public:
                                   bool extrapolate = false) const;
 
 private:
-  const ChebyshevInterpolation &interp_;
+  const ChebyshevInterpolationDouble &interp_;
 };
 
 /**
- * @brief Create a Chebyshev interpolation
+ * @brief Create a double-precision Chebyshev interpolation
  *
  * @param num_points Number of interpolation points
  * @param func Function to interpolate
@@ -232,13 +235,16 @@ private:
  * @param domain_end End of domain
  * @return Shared pointer to Chebyshev interpolation
  */
-std::shared_ptr<ChebyshevInterpolation> createChebyshevInterpolation(
-    size_t num_points, const std::function<double(double)> &func,
-    ChebyshevKind kind = SECOND_KIND, double domain_start = -1.0,
-    double domain_end = 1.0);
+std::shared_ptr<ChebyshevInterpolationDouble>
+createChebyshevInterpolationDouble(size_t num_points,
+                                   const std::function<double(double)> &func,
+                                   ChebyshevKind kind = SECOND_KIND,
+                                   double domain_start = -1.0,
+                                   double domain_end = 1.0);
 
 /**
- * @brief Create a Chebyshev interpolation from nodes and values
+ * @brief Create a double-precision Chebyshev interpolation from nodes and
+ * values
  *
  * @param nodes Interpolation nodes
  * @param values Function values at nodes
@@ -247,49 +253,131 @@ std::shared_ptr<ChebyshevInterpolation> createChebyshevInterpolation(
  * @param domain_end End of domain
  * @return Shared pointer to Chebyshev interpolation
  */
-std::shared_ptr<ChebyshevInterpolation> createChebyshevInterpolation(
-    const std::vector<double> &nodes, const std::vector<double> &values,
-    ChebyshevKind kind = SECOND_KIND, double domain_start = -1.0,
-    double domain_end = 1.0);
+std::shared_ptr<ChebyshevInterpolationDouble>
+createChebyshevInterpolationDouble(const std::vector<double> &nodes,
+                                   const std::vector<double> &values,
+                                   ChebyshevKind kind = SECOND_KIND,
+                                   double domain_start = -1.0,
+                                   double domain_end = 1.0);
 
 /**
  * @brief Single-precision Chebyshev polynomial interpolation
  */
-class ChebyshevInterpolationFloat {
+class ChebyshevInterpolationSingle {
 public:
-  ChebyshevInterpolationFloat(size_t num_points,
-                              const std::function<float(float)> &func,
-                              ChebyshevKind kind = SECOND_KIND,
-                              float domain_start = -1.0f,
-                              float domain_end = 1.0f);
+  /**
+   * @brief Constructor from function
+   *
+   * @param num_points Number of interpolation points
+   * @param func Function to interpolate
+   * @param kind Chebyshev polynomial kind
+   * @param domain_start Start of domain
+   * @param domain_end End of domain
+   */
+  ChebyshevInterpolationSingle(size_t num_points,
+                               const std::function<float(float)> &func,
+                               ChebyshevKind kind = SECOND_KIND,
+                               float domain_start = -1.0f,
+                               float domain_end = 1.0f);
 
-  ChebyshevInterpolationFloat(const std::vector<float> &nodes,
-                              const std::vector<float> &values,
-                              ChebyshevKind kind = SECOND_KIND,
-                              float domain_start = -1.0f,
-                              float domain_end = 1.0f);
+  /**
+   * @brief Constructor from nodes and values
+   *
+   * @param nodes Interpolation nodes
+   * @param values Function values at nodes
+   * @param kind Chebyshev polynomial kind
+   * @param domain_start Start of domain
+   * @param domain_end End of domain
+   */
+  ChebyshevInterpolationSingle(const std::vector<float> &nodes,
+                               const std::vector<float> &values,
+                               ChebyshevKind kind = SECOND_KIND,
+                               float domain_start = -1.0f,
+                               float domain_end = 1.0f);
 
-  ~ChebyshevInterpolationFloat() = default;
+  /**
+   * @brief Destructor
+   */
+  ~ChebyshevInterpolationSingle() = default;
 
+  /**
+   * @brief Evaluate interpolation at a point
+   *
+   * @param x Evaluation point
+   * @param extrapolate Whether to allow extrapolation
+   * @return Interpolated value
+   */
   float operator()(float x, bool extrapolate = false) const;
+
+  /**
+   * @brief Update the function values at nodes
+   *
+   * @param values New function values at the existing nodes
+   */
   void updateValues(const std::vector<float> &values);
 
-  // Getters
+  /**
+   * @brief Get number of interpolation points
+   */
   size_t getNumPoints() const { return num_points_; }
+
+  /**
+   * @brief Get Chebyshev nodes
+   */
   const std::vector<float> &getNodes() const { return nodes_; }
+
+  /**
+   * @brief Get function values at nodes
+   */
   const std::vector<float> &getValues() const { return values_; }
+
+  /**
+   * @brief Get Chebyshev coefficients
+   */
   const std::vector<float> &getCoefficients() const { return coefficients_; }
+
+  /**
+   * @brief Get domain start
+   */
   float getDomainStart() const { return domain_start_; }
+
+  /**
+   * @brief Get domain end
+   */
   float getDomainEnd() const { return domain_end_; }
+
+  /**
+   * @brief Get Chebyshev kind
+   */
   ChebyshevKind getKind() const { return kind_; }
 
 private:
+  /**
+   * @brief Initialize nodes based on Chebyshev kind
+   */
   void initializeNodes();
+
+  /**
+   * @brief Compute Chebyshev coefficients
+   */
   void computeCoefficients();
+
+  /**
+   * @brief Map a point from original domain to standard domain [-1, 1]
+   */
   float mapToStandardDomain(float x) const;
+
+  /**
+   * @brief Map a point from standard domain [-1, 1] to original domain
+   */
   float mapFromStandardDomain(float t) const;
+
+  /**
+   * @brief Evaluate Chebyshev polynomial
+   */
   float evaluateChebyshev(int n, float x, ChebyshevKind kind) const;
 
+  // Member variables
   size_t num_points_;
   ChebyshevKind kind_;
   float domain_start_;
@@ -300,33 +388,81 @@ private:
 };
 
 /**
- * @brief SIMD-accelerated Chebyshev interpolation using single-precision
+ * @brief SIMD-accelerated single-precision Chebyshev interpolation
  */
-class SimdChebyshevInterpolationFloat {
+class SimdChebyshevInterpolationSingle {
 public:
-  explicit SimdChebyshevInterpolationFloat(
-      const ChebyshevInterpolationFloat &interp);
-  ~SimdChebyshevInterpolationFloat() = default;
+  /**
+   * @brief Constructor from standard interpolation
+   *
+   * @param interp Base Chebyshev interpolation
+   */
+  explicit SimdChebyshevInterpolationSingle(
+      const ChebyshevInterpolationSingle &interp);
 
+  /**
+   * @brief Destructor
+   */
+  ~SimdChebyshevInterpolationSingle() = default;
+
+  /**
+   * @brief Evaluate interpolation at multiple points
+   *
+   * @param x Vector of evaluation points
+   * @param y Vector to store results
+   * @param extrapolate Whether to allow extrapolation
+   */
   void evaluate(const std::vector<float> &x, std::vector<float> &y,
                 bool extrapolate = false) const;
+
+  /**
+   * @brief Evaluate interpolation at 8 points using AVX2
+   *
+   * @param x Array of 8 evaluation points
+   * @param extrapolate Whether to allow extrapolation
+   * @return Array of 8 interpolated values
+   */
   std::array<float, 8> evaluate8(const std::array<float, 8> &x,
                                  bool extrapolate = false) const;
 
 private:
-  const ChebyshevInterpolationFloat &interp_;
+  const ChebyshevInterpolationSingle &interp_;
 };
 
-// Factory functions for float version
-std::shared_ptr<ChebyshevInterpolationFloat> createChebyshevInterpolationFloat(
-    size_t num_points, const std::function<float(float)> &func,
-    ChebyshevKind kind = SECOND_KIND, float domain_start = -1.0f,
-    float domain_end = 1.0f);
+/**
+ * @brief Create a single-precision Chebyshev interpolation
+ *
+ * @param num_points Number of interpolation points
+ * @param func Function to interpolate
+ * @param kind Chebyshev polynomial kind
+ * @param domain_start Start of domain
+ * @param domain_end End of domain
+ * @return Shared pointer to single-precision Chebyshev interpolation
+ */
+std::shared_ptr<ChebyshevInterpolationSingle>
+createChebyshevInterpolationSingle(size_t num_points,
+                                   const std::function<float(float)> &func,
+                                   ChebyshevKind kind = SECOND_KIND,
+                                   float domain_start = -1.0f,
+                                   float domain_end = 1.0f);
 
-std::shared_ptr<ChebyshevInterpolationFloat> createChebyshevInterpolationFloat(
-    const std::vector<float> &nodes, const std::vector<float> &values,
-    ChebyshevKind kind = SECOND_KIND, float domain_start = -1.0f,
-    float domain_end = 1.0f);
+/**
+ * @brief Create a single-precision Chebyshev interpolation from nodes and
+ * values
+ *
+ * @param nodes Interpolation nodes
+ * @param values Function values at nodes
+ * @param kind Chebyshev polynomial kind
+ * @param domain_start Start of domain
+ * @param domain_end End of domain
+ * @return Shared pointer to single-precision Chebyshev interpolation
+ */
+std::shared_ptr<ChebyshevInterpolationSingle>
+createChebyshevInterpolationSingle(const std::vector<float> &nodes,
+                                   const std::vector<float> &values,
+                                   ChebyshevKind kind = SECOND_KIND,
+                                   float domain_start = -1.0f,
+                                   float domain_end = 1.0f);
 
 } // namespace num
 } // namespace alo

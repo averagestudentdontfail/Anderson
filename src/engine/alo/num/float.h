@@ -19,7 +19,6 @@ namespace num {
  * @return Approximated erf(x)
  */
 inline float fast_erf(float x) {
-  // Abramowitz and Stegun approximation
   float t = 1.0f / (1.0f + 0.3275911f * std::abs(x));
   float result =
       1.0f - ((((1.061405429f * t + -1.453152027f) * t + 1.421413741f) * t +

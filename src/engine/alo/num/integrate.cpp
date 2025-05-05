@@ -11,21 +11,21 @@ namespace alo {
 namespace num {
 
 /**
- * @brief Gauss-Legendre quadrature implementation
+ * @brief Gauss-Legendre quadrature implementation with double-precision
  *
  * This class implements Gauss-Legendre quadrature for numerical integration.
  */
-class GaussLegendreIntegrator : public Integrator {
+class GaussLegendreIntegratorDouble : public IntegratorDouble {
 public:
   /**
    * @brief Constructor
    *
    * @param order Number of integration points
    */
-  explicit GaussLegendreIntegrator(size_t order) : order_(order) {
+  explicit GaussLegendreIntegratorDouble(size_t order) : order_(order) {
     if (order_ < 1) {
       throw std::invalid_argument(
-          "GaussLegendreIntegrator: Order must be at least 1");
+          "GaussLegendreIntegratorDouble: Order must be at least 1");
     }
     initializeNodesAndWeights();
   }
@@ -33,7 +33,7 @@ public:
   /**
    * @brief Destructor
    */
-  ~GaussLegendreIntegrator() override = default;
+  ~GaussLegendreIntegratorDouble() override = default;
 
   /**
    * @brief Integrate a function over an interval
@@ -163,12 +163,12 @@ private:
 };
 
 /**
- * @brief Tanh-Sinh quadrature implementation
+ * @brief Tanh-Sinh quadrature implementation with double-precision
  *
  * This class implements Tanh-Sinh quadrature (double exponential quadrature)
  * for numerical integration with high precision.
  */
-class TanhSinhIntegrator : public Integrator {
+class TanhSinhIntegratorDouble : public IntegratorDouble {
 public:
   /**
    * @brief Constructor
@@ -176,22 +176,22 @@ public:
    * @param tolerance Integration tolerance
    * @param max_levels Maximum number of refinement levels
    */
-  explicit TanhSinhIntegrator(double tolerance, int max_levels = 12)
+  explicit TanhSinhIntegratorDouble(double tolerance, int max_levels = 12)
       : tolerance_(tolerance), max_levels_(max_levels) {
     if (tolerance_ <= 0.0) {
       throw std::invalid_argument(
-          "TanhSinhIntegrator: Tolerance must be positive");
+          "TanhSinhIntegratorDouble: Tolerance must be positive");
     }
     if (max_levels_ < 1) {
       throw std::invalid_argument(
-          "TanhSinhIntegrator: Max levels must be at least 1");
+          "TanhSinhIntegratorDouble: Max levels must be at least 1");
     }
   }
 
   /**
    * @brief Destructor
    */
-  ~TanhSinhIntegrator() override = default;
+  ~TanhSinhIntegratorDouble() override = default;
 
   /**
    * @brief Integrate a function over an interval
@@ -262,12 +262,12 @@ private:
 };
 
 /**
- * @brief Adaptive quadrature implementation
+ * @brief Adaptive quadrature implementation with double-precision
  *
  * This class implements adaptive quadrature using the Gauss-Kronrod method
  * for efficient numerical integration with error control.
  */
-class AdaptiveIntegrator : public Integrator {
+class AdaptiveIntegratorDouble : public IntegratorDouble {
 public:
   /**
    * @brief Constructor
@@ -276,17 +276,17 @@ public:
    * @param relative_tolerance Relative error tolerance
    * @param max_intervals Maximum number of intervals
    */
-  AdaptiveIntegrator(double absolute_tolerance, double relative_tolerance,
-                     size_t max_intervals)
+  AdaptiveIntegratorDouble(double absolute_tolerance, double relative_tolerance,
+                           size_t max_intervals)
       : abs_tol_(absolute_tolerance), rel_tol_(relative_tolerance),
         max_intervals_(max_intervals) {
     if (abs_tol_ <= 0.0 && rel_tol_ <= 0.0) {
       throw std::invalid_argument(
-          "AdaptiveIntegrator: At least one tolerance must be positive");
+          "AdaptiveIntegratorDouble: At least one tolerance must be positive");
     }
     if (max_intervals_ < 1) {
       throw std::invalid_argument(
-          "AdaptiveIntegrator: Max intervals must be at least 1");
+          "AdaptiveIntegratorDouble: Max intervals must be at least 1");
     }
 
     // Initialize Gauss-Kronrod nodes and weights
@@ -296,7 +296,7 @@ public:
   /**
    * @brief Destructor
    */
-  ~AdaptiveIntegrator() override = default;
+  ~AdaptiveIntegratorDouble() override = default;
 
   /**
    * @brief Integrate a function over an interval
@@ -468,24 +468,26 @@ private:
   std::vector<double> k_weights_;
 };
 
-std::shared_ptr<Integrator> createIntegrator(const std::string &scheme_type,
-                                             size_t order, double tolerance) {
+std::shared_ptr<IntegratorDouble>
+createIntegratorDouble(const std::string &scheme_type, size_t order,
+                       double tolerance) {
 
   if (scheme_type == "GaussLegendre") {
     if (order == 0) {
       order = 7; // Default order
     }
-    return std::make_shared<GaussLegendreIntegrator>(order);
+    return std::make_shared<GaussLegendreIntegratorDouble>(order);
   } else if (scheme_type == "TanhSinh") {
     if (tolerance <= 0.0) {
       tolerance = 1e-8; // Default tolerance
     }
-    return std::make_shared<TanhSinhIntegrator>(tolerance);
+    return std::make_shared<TanhSinhIntegratorDouble>(tolerance);
   } else if (scheme_type == "Adaptive") {
     if (tolerance <= 0.0) {
       tolerance = 1e-8; // Default tolerance
     }
-    return std::make_shared<AdaptiveIntegrator>(tolerance, tolerance, 1000);
+    return std::make_shared<AdaptiveIntegratorDouble>(tolerance, tolerance,
+                                                      1000);
   } else {
     throw std::invalid_argument("Unknown integrator type: " + scheme_type);
   }
@@ -494,10 +496,10 @@ std::shared_ptr<Integrator> createIntegrator(const std::string &scheme_type,
 // ===== Single-precision Integrator Implementation =====
 
 // Default implementation for batch integration
-void IntegratorFloat::batchIntegrate(const std::function<float(float)> &f,
-                                     const std::vector<float> &a,
-                                     const std::vector<float> &b,
-                                     std::vector<float> &results) const {
+void IntegratorSingle::batchIntegrate(const std::function<float(float)> &f,
+                                      const std::vector<float> &a,
+                                      const std::vector<float> &b,
+                                      std::vector<float> &results) const {
 
   if (results.size() < a.size()) {
     results.resize(a.size());
@@ -521,17 +523,17 @@ void IntegratorFloat::batchIntegrate(const std::function<float(float)> &f,
 /**
  * @brief Gauss-Legendre quadrature implementation with single-precision
  */
-class GaussLegendreIntegratorFloat : public IntegratorFloat {
+class GaussLegendreIntegratorSingle : public IntegratorSingle {
 public:
   /**
    * @brief Constructor
    *
    * @param order Number of integration points
    */
-  explicit GaussLegendreIntegratorFloat(size_t order) : order_(order) {
+  explicit GaussLegendreIntegratorSingle(size_t order) : order_(order) {
     if (order_ < 1) {
       throw std::invalid_argument(
-          "GaussLegendreIntegratorFloat: Order must be at least 1");
+          "GaussLegendreIntegratorSingle: Order must be at least 1");
     }
     initializeNodesAndWeights();
   }
@@ -539,7 +541,7 @@ public:
   /**
    * @brief Destructor
    */
-  ~GaussLegendreIntegratorFloat() override = default;
+  ~GaussLegendreIntegratorSingle() override = default;
 
   /**
    * @brief Integrate a function over an interval
@@ -576,7 +578,7 @@ public:
    *
    * @return Integrator name
    */
-  std::string name() const override { return "Gauss-Legendre (float)"; }
+  std::string name() const override { return "Gauss-Legendre (single)"; }
 
   /**
    * @brief Batch integrate a function using SIMD
@@ -696,7 +698,7 @@ private:
 /**
  * @brief Adaptive quadrature implementation with single-precision
  */
-class AdaptiveIntegratorFloat : public IntegratorFloat {
+class AdaptiveIntegratorSingle : public IntegratorSingle {
 public:
   /**
    * @brief Constructor
@@ -705,17 +707,17 @@ public:
    * @param relative_tolerance Relative error tolerance
    * @param max_intervals Maximum number of intervals
    */
-  AdaptiveIntegratorFloat(float absolute_tolerance, float relative_tolerance,
-                          size_t max_intervals)
+  AdaptiveIntegratorSingle(float absolute_tolerance, float relative_tolerance,
+                           size_t max_intervals)
       : abs_tol_(absolute_tolerance), rel_tol_(relative_tolerance),
         max_intervals_(max_intervals) {
     if (abs_tol_ <= 0.0f && rel_tol_ <= 0.0f) {
       throw std::invalid_argument(
-          "AdaptiveIntegratorFloat: At least one tolerance must be positive");
+          "AdaptiveIntegratorSingle: At least one tolerance must be positive");
     }
     if (max_intervals_ < 1) {
       throw std::invalid_argument(
-          "AdaptiveIntegratorFloat: Max intervals must be at least 1");
+          "AdaptiveIntegratorSingle: Max intervals must be at least 1");
     }
 
     // Initialize Gauss-Kronrod nodes and weights for single-precision
@@ -725,7 +727,7 @@ public:
   /**
    * @brief Destructor
    */
-  ~AdaptiveIntegratorFloat() override = default;
+  ~AdaptiveIntegratorSingle() override = default;
 
   /**
    * @brief Integrate a function over an interval
@@ -821,7 +823,9 @@ public:
    *
    * @return Integrator name
    */
-  std::string name() const override { return "Adaptive Gauss-Kronrod (float)"; }
+  std::string name() const override {
+    return "Adaptive Gauss-Kronrod (single)";
+  }
 
 private:
   /**
@@ -898,22 +902,22 @@ private:
   std::vector<float> k_weights_;
 };
 
-std::shared_ptr<IntegratorFloat>
-createIntegratorFloat(const std::string &scheme_type, size_t order,
-                      float tolerance) {
+std::shared_ptr<IntegratorSingle>
+createIntegratorSingle(const std::string &scheme_type, size_t order,
+                       float tolerance) {
 
   if (scheme_type == "GaussLegendre") {
     if (order == 0) {
       // Use 8 points as default for AVX2 optimization
       order = 8;
     }
-    return std::make_shared<GaussLegendreIntegratorFloat>(order);
+    return std::make_shared<GaussLegendreIntegratorSingle>(order);
   } else if (scheme_type == "Adaptive") {
     if (tolerance <= 0.0f) {
       tolerance = 1e-6f; // Default tolerance for single-precision
     }
-    return std::make_shared<AdaptiveIntegratorFloat>(tolerance, tolerance,
-                                                     1000);
+    return std::make_shared<AdaptiveIntegratorSingle>(tolerance, tolerance,
+                                                      1000);
   } else {
     throw std::invalid_argument("Unknown single-precision integrator type: " +
                                 scheme_type);
