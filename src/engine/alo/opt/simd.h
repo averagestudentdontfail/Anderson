@@ -3,6 +3,12 @@
 
 #include "../num/float.h"
 #include <immintrin.h>
+#include <sleef.h>
+#include <array>
+#include <cmath>
+#include <algorithm>
+#include <cstring>  
+#include <cstdint>  
 
 namespace engine {
 namespace alo {

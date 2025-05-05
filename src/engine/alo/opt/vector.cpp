@@ -11,11 +11,9 @@
 // Platform-specific CPU detection
 #ifdef _WIN32
 #include <intrin.h>
-// Windows implementation uses __cpuid intrinsic
 inline void get_cpuid(int level, int output[4]) { __cpuid(output, level); }
 #else
 #include <cpuid.h>
-// Linux/GCC implementation uses __get_cpuid intrinsic
 inline void get_cpuid(int level, int output[4]) {
   unsigned int *regs = reinterpret_cast<unsigned int *>(output);
   __get_cpuid(level, &regs[0], &regs[1], &regs[2], &regs[3]);
@@ -26,7 +24,6 @@ namespace engine {
 namespace alo {
 namespace opt {
 
-// SIMD detection implementation
 SIMDSupport detectSIMDSupport() {
   int info[4];
 
@@ -44,7 +41,7 @@ SIMDSupport detectSIMDSupport() {
   if (!(info[1] & (1 << 5)))
     return AVX;
 
-  // Check for AVX-512F
+  // Check for AVX512F
   if (!(info[1] & (1 << 16)))
     return AVX2;
 

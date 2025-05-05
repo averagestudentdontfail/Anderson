@@ -4,10 +4,55 @@
 #include <vector>
 #include <cstddef>
 #include "../num/float.h"
+#include <array>
+#include <cmath>
+#include <algorithm>
+#include <vector>
 
 namespace engine {
 namespace alo {
 namespace opt {
+
+// SIMD support detection
+enum SIMDSupport {
+    NONE,
+    SSE2,
+    AVX,
+    AVX2,
+    AVX512
+};
+
+// Declare the detection function
+SIMDSupport detectSIMDSupport();
+
+namespace engine {
+namespace alo {
+namespace opt {
+
+// Generic option batch class
+struct OptionBatch {
+    std::vector<double> spots;
+    std::vector<double> strikes;
+    std::vector<double> rates;
+    std::vector<double> dividends;
+    std::vector<double> vols;
+    std::vector<double> times;
+    std::vector<float> results;
+    
+    void resize(size_t size) {
+        spots.resize(size);
+        strikes.resize(size);
+        rates.resize(size);
+        dividends.resize(size);
+        vols.resize(size);
+        times.resize(size);
+        results.resize(size);
+    }
+    
+    size_t size() const {
+        return spots.size();
+    }
+};
 
 // Structure of Arrays (SoA) layout for single-precision batch processing
 struct OptionBatchSingle {
@@ -153,6 +198,39 @@ public:
     
     // Conversion utilities
     static std::vector<double> convertToDouble(const std::vector<float>& input);
+};
+
+/**
+ * @class VectorMath
+ * @brief Optimized vector math operations used by pricing functions
+ */
+class VectorMath {
+public:
+    // Basic math operations
+    static void exp(const double* x, double* result, size_t size);
+    static void log(const double* x, double* result, size_t size);
+    static void sqrt(const double* x, double* result, size_t size);
+    static void erf(const double* x, double* result, size_t size);
+    static void normalCDF(const double* x, double* result, size_t size);
+    static void normalPDF(const double* x, double* result, size_t size);
+    static void multiply(const double* a, const double* b, double* result, size_t size);
+    static void add(const double* a, const double* b, double* result, size_t size);
+    static void subtract(const double* a, const double* b, double* result, size_t size);
+    static void divide(const double* a, const double* b, double* result, size_t size);
+    
+    // Black-Scholes functions
+    static void bsPut(const double* S, const double* K, const double* r, const double* q,
+                     const double* vol, const double* T, double* result, size_t size);
+    
+    static void bsCall(const double* S, const double* K, const double* r, const double* q,
+                      const double* vol, const double* T, double* result, size_t size);
+    
+    // American option approximations
+    static void americanPutApprox(const double* S, const double* K, const double* r, const double* q,
+                                 const double* vol, const double* T, double* result, size_t size);
+    
+    static void americanCallApprox(const double* S, const double* K, const double* r, const double* q,
+                                  const double* vol, const double* T, double* result, size_t size);
 };
 
 } // namespace opt
