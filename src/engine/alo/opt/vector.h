@@ -7,7 +7,6 @@
 #include <array>
 #include <cmath>
 #include <algorithm>
-#include <vector>
 
 namespace engine {
 namespace alo {
@@ -24,10 +23,6 @@ enum SIMDSupport {
 
 // Declare the detection function
 SIMDSupport detectSIMDSupport();
-
-namespace engine {
-namespace alo {
-namespace opt {
 
 // Generic option batch class
 struct OptionBatch {
@@ -152,18 +147,6 @@ public:
     
     static void AmericanCall(const double* S, const double* K, const double* r, const double* q,
                            const double* vol, const double* T, double* results, size_t size);
-    
-    // Utility math operations
-    static void exp(const double* x, double* result, size_t size);
-    static void log(const double* x, double* result, size_t size);
-    static void sqrt(const double* x, double* result, size_t size);
-    static void erf(const double* x, double* result, size_t size);
-    static void normalCDF(const double* x, double* result, size_t size);
-    static void normalPDF(const double* x, double* result, size_t size);
-    static void multiply(const double* a, const double* b, double* result, size_t size);
-    static void add(const double* a, const double* b, double* result, size_t size);
-    static void subtract(const double* a, const double* b, double* result, size_t size);
-    static void divide(const double* a, const double* b, double* result, size_t size);
     
     // Conversion utilities
     static std::vector<float> convertToSingle(const std::vector<double>& input);

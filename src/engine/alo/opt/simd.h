@@ -37,7 +37,7 @@ public:
    * @param arr Array of 4 doubles
    * @return 256-bit vector containing 4 doubles
    */
-  static inline __m256d load(const std::array<double, 4> &arr) {
+  static inline __m256d load(const ::std::array<double, 4> &arr) {
     return _mm256_loadu_pd(arr.data());
   }
 
@@ -57,7 +57,7 @@ public:
    * @param arr Array of 4 doubles
    * @param vec 256-bit vector containing 4 doubles
    */
-  static inline void store(std::array<double, 4> &arr, __m256d vec) {
+  static inline void store(::std::array<double, 4> &arr, __m256d vec) {
     _mm256_storeu_pd(arr.data(), vec);
   }
 
