@@ -1,4 +1,5 @@
 #include "integrate.h"
+#include <immintrin.h>
 #include <algorithm>
 #include <cmath>
 #include <limits>

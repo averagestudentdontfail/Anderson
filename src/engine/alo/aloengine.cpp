@@ -17,6 +17,7 @@
 #include <array>
 #include <vector>
 #include <cstring> 
+#include <iostream>
 
 namespace engine {
 namespace alo {
@@ -91,11 +92,8 @@ std::string ALOEngine::getEquationName() const {
 }
  
 void ALOEngine::clearCache() const {
-    // Clear both the legacy cache and the new thread-local cache
+    // Clear both the legacy cache and the thread-local cache
     opt::getThreadLocalCache().clear();
-    
-    // Also clear the global tiered cache
-    opt::getTieredPricingCache().clear();
     
     // Also clear the legacy string cache for backward compatibility
     legacy_cache_.clear();
@@ -104,7 +102,6 @@ void ALOEngine::clearCache() const {
 size_t ALOEngine::getCacheSize() const {
     // Return combined size of all caches
     return opt::getThreadLocalCache().size() + 
-           opt::getTieredPricingCache().sharedSize() + 
            legacy_cache_.size();
 }
  
@@ -139,8 +136,8 @@ double ALOEngine::blackScholesCall(double S, double K, double r, double q, doubl
 std::shared_ptr<ALOIterationScheme> ALOEngine::createFastScheme() {
     // Legendre-Legendre (7,2,7)-27 scheme
     try {
-        auto fpIntegrator = num::createIntegrator("GaussLegendre", 7);
-        auto pricingIntegrator = num::createIntegrator("GaussLegendre", 27);
+        auto fpIntegrator = num::createIntegratorSingle("GaussLegendre", 7);
+        auto pricingIntegrator = num::createIntegratorSingle("GaussLegendre", 27);
         
         return std::make_shared<ALOIterationScheme>(7, 2, fpIntegrator, pricingIntegrator);
     } catch (const std::exception& e) {
@@ -151,8 +148,8 @@ std::shared_ptr<ALOIterationScheme> ALOEngine::createFastScheme() {
 std::shared_ptr<ALOIterationScheme> ALOEngine::createAccurateScheme() {
     // Legendre-TanhSinh (25,5,13)-1e-8 scheme
     try {
-        auto fpIntegrator = num::createIntegrator("GaussLegendre", 25);
-        auto pricingIntegrator = num::createIntegrator("TanhSinh", 0, 1e-8);
+        auto fpIntegrator = num::createIntegratorSingle("GaussLegendre", 25);
+        auto pricingIntegrator = num::createIntegratorSingle("TanhSinh", 0, 1e-8);
         
         return std::make_shared<ALOIterationScheme>(13, 5, fpIntegrator, pricingIntegrator);
     } catch (const std::exception& e) {
@@ -163,8 +160,8 @@ std::shared_ptr<ALOIterationScheme> ALOEngine::createAccurateScheme() {
 std::shared_ptr<ALOIterationScheme> ALOEngine::createHighPrecisionScheme() {
     // TanhSinh-TanhSinh (10,30)-1e-10 scheme
     try {
-        auto fpIntegrator = num::createIntegrator("TanhSinh", 0, 1e-10);
-        auto pricingIntegrator = num::createIntegrator("TanhSinh", 0, 1e-10);
+        auto fpIntegrator = num::createIntegratorSingle("TanhSinh", 0, 1e-10);
+        auto pricingIntegrator = num::createIntegratorSingle("TanhSinh", 0, 1e-10);
         
         return std::make_shared<ALOIterationScheme>(30, 10, fpIntegrator, pricingIntegrator);
     } catch (const std::exception& e) {
@@ -233,43 +230,64 @@ double ALOEngine::calculatePutImpl(double S, double K, double r, double q, doubl
         return std::max(0.0, K - S);
     }
     
-    // Create efficient binary cache key
-    opt::OptionParams params{S, K, r, q, vol, T, 0}; // 0 = PUT
+    // Create option parameters
+    struct OptionParams {
+        double S, K, r, q, vol, T;
+        int type; // 0=PUT, 1=CALL
+        
+        bool operator==(const OptionParams& other) const {
+            return S == other.S && K == other.K && r == other.r &&
+                   q == other.q && vol == other.vol && T == other.T &&
+                   type == other.type;
+        }
+    };
     
-    // Use tiered cache for maximum performance
-    return opt::getCachedPrice(params, [&]() {
-        // Handle special cases from the paper
-        if (r < 0.0 && q < r) {
-            throw std::runtime_error("Double-boundary case q<r<0 for a put option is not implemented");
-        }
-        
-        // Check if we're in the European case
-        if (r <= 0.0 && r <= q) {
-            return blackScholesPut(S, K, r, q, vol, T);
-        }
-        
-        // Create American put model
-        mod::AmericanPut american_put(scheme_->getPricingIntegrator());
-        
-        // Calculate early exercise boundary
-        auto boundary = american_put.calculateExerciseBoundary(
-            S, K, r, q, vol, T,
-            scheme_->getNumChebyshevNodes(),
-            scheme_->getNumFixedPointIterations(),
-            scheme_->getFixedPointIntegrator()
-        );
-        
-        // Calculate early exercise premium
-        double earlyExercisePremium = american_put.calculateEarlyExercisePremium(
-            S, K, r, q, vol, T, boundary);
-        
-        // Calculate European put value
-        mod::EuropeanPut european_put;
-        double europeanValue = european_put.calculatePrice(S, K, r, q, vol, T);
-        
-        // American put value = European put value + early exercise premium
-        return std::max(europeanValue, 0.0) + std::max(0.0, earlyExercisePremium);
-    });
+    OptionParams params{S, K, r, q, vol, T, 0}; // 0 = PUT
+    
+    // Use thread-local cache with function to compute if not found
+    auto& cache = opt::getThreadLocalCache();
+    auto it = cache.find(params);
+    if (it != cache.end()) {
+        return it->second;
+    }
+    
+    // Handle special cases from the paper
+    if (r < 0.0 && q < r) {
+        throw std::runtime_error("Double-boundary case q<r<0 for a put option is not implemented");
+    }
+    
+    // Check if we're in the European case
+    if (r <= 0.0 && r <= q) {
+        double result = blackScholesPut(S, K, r, q, vol, T);
+        cache[params] = result;
+        return result;
+    }
+    
+    // Create American put model
+    mod::AmericanPutDouble american_put(scheme_->getPricingIntegrator());
+    
+    // Calculate early exercise boundary
+    auto boundary = american_put.calculateExerciseBoundary(
+        S, K, r, q, vol, T,
+        scheme_->getNumChebyshevNodes(),
+        scheme_->getNumFixedPointIterations(),
+        scheme_->getFixedPointIntegrator()
+    );
+    
+    // Calculate early exercise premium
+    double earlyExercisePremium = american_put.calculateEarlyExercisePremium(
+        S, K, r, q, vol, T, boundary);
+    
+    // Calculate European put value
+    mod::EuropeanPutDouble european_put;
+    double europeanValue = european_put.calculatePrice(S, K, r, q, vol, T);
+    
+    // American put value = European put value + early exercise premium
+    double result = std::max(europeanValue, 0.0) + std::max(0.0, earlyExercisePremium);
+    
+    // Cache and return result
+    cache[params] = result;
+    return result;
 }
  
 double ALOEngine::calculateCallImpl(double S, double K, double r, double q, double vol, double T) const {
@@ -278,45 +296,68 @@ double ALOEngine::calculateCallImpl(double S, double K, double r, double q, doub
         return std::max(0.0, S - K);
     }
     
-    // Create efficient binary cache key
-    opt::OptionParams params{S, K, r, q, vol, T, 1}; // 1 = CALL
+    // Create option parameters
+    struct OptionParams {
+        double S, K, r, q, vol, T;
+        int type; // 0=PUT, 1=CALL
+        
+        bool operator==(const OptionParams& other) const {
+            return S == other.S && K == other.K && r == other.r &&
+                   q == other.q && vol == other.vol && T == other.T &&
+                   type == other.type;
+        }
+    };
     
-    // Use thread-local cache with optimized key
-    return opt::getCachedPrice(params, [&]() {
-        // For calls with no dividends, early exercise is never optimal
-        if (q <= 0.0) {
-            mod::EuropeanCall european_call;
-            return european_call.calculatePrice(S, K, r, q, vol, T);
-        }
-        
-        // Check if we're in the European case
-        if (r < 0.0 && q >= r) {
-            mod::EuropeanCall european_call;
-            return european_call.calculatePrice(S, K, r, q, vol, T);
-        }
-        
-        // Create American call model
-        mod::AmericanCall american_call(scheme_->getPricingIntegrator());
-        
-        // Calculate early exercise boundary
-        auto boundary = american_call.calculateExerciseBoundary(
-            S, K, r, q, vol, T,
-            scheme_->getNumChebyshevNodes(),
-            scheme_->getNumFixedPointIterations(),
-            scheme_->getFixedPointIntegrator()
-        );
-        
-        // Calculate early exercise premium
-        double earlyExercisePremium = american_call.calculateEarlyExercisePremium(
-            S, K, r, q, vol, T, boundary);
-        
-        // Calculate European call value
-        mod::EuropeanCall european_call;
-        double europeanValue = european_call.calculatePrice(S, K, r, q, vol, T);
-        
-        // American call value = European call value + early exercise premium
-        return std::max(europeanValue, 0.0) + std::max(0.0, earlyExercisePremium);
-    });
+    OptionParams params{S, K, r, q, vol, T, 1}; // 1 = CALL
+    
+    // Use thread-local cache
+    auto& cache = opt::getThreadLocalCache();
+    auto it = cache.find(params);
+    if (it != cache.end()) {
+        return it->second;
+    }
+    
+    // For calls with no dividends, early exercise is never optimal
+    if (q <= 0.0) {
+        mod::EuropeanCallDouble european_call;
+        double result = european_call.calculatePrice(S, K, r, q, vol, T);
+        cache[params] = result;
+        return result;
+    }
+    
+    // Check if we're in the European case
+    if (r < 0.0 && q >= r) {
+        mod::EuropeanCallDouble european_call;
+        double result = european_call.calculatePrice(S, K, r, q, vol, T);
+        cache[params] = result;
+        return result;
+    }
+    
+    // Create American call model
+    mod::AmericanCallDouble american_call(scheme_->getPricingIntegrator());
+    
+    // Calculate early exercise boundary
+    auto boundary = american_call.calculateExerciseBoundary(
+        S, K, r, q, vol, T,
+        scheme_->getNumChebyshevNodes(),
+        scheme_->getNumFixedPointIterations(),
+        scheme_->getFixedPointIntegrator()
+    );
+    
+    // Calculate early exercise premium
+    double earlyExercisePremium = american_call.calculateEarlyExercisePremium(
+        S, K, r, q, vol, T, boundary);
+    
+    // Calculate European call value
+    mod::EuropeanCallDouble european_call;
+    double europeanValue = european_call.calculatePrice(S, K, r, q, vol, T);
+    
+    // American call value = European call value + early exercise premium
+    double result = std::max(europeanValue, 0.0) + std::max(0.0, earlyExercisePremium);
+    
+    // Cache and return result
+    cache[params] = result;
+    return result;
 }
 
 // Helper method for processing a chunk of American put options
@@ -332,32 +373,54 @@ void ALOEngine::processAmericanPutChunk(const double* S, const double* K, const 
     // Calculate early exercise premiums
     for (size_t i = 0; i < n; ++i) {
         // Use cached early exercise premium calculation
-        opt::OptionParams params{S[i], K[i], r[i], q[i], vol[i], T[i], 0}; // 0 = PUT
-        
-        results[i] = opt::getCachedPrice(params, [&]() {
-            // Skip full calculation if it's a European-only case
-            if (r[i] <= 0.0 && r[i] <= q[i]) {
-                return european_prices[i];
+        struct OptionParams {
+            double S, K, r, q, vol, T;
+            int type; // 0=PUT, 1=CALL
+            
+            bool operator==(const OptionParams& other) const {
+                return S == other.S && K == other.K && r == other.r &&
+                       q == other.q && vol == other.vol && T == other.T &&
+                       type == other.type;
             }
-            
-            // Create American put model
-            mod::AmericanPut american_put(scheme_->getPricingIntegrator());
-            
-            // Calculate early exercise boundary
-            auto boundary = american_put.calculateExerciseBoundary(
-                S[i], K[i], r[i], q[i], vol[i], T[i],
-                scheme_->getNumChebyshevNodes(),
-                scheme_->getNumFixedPointIterations(),
-                scheme_->getFixedPointIntegrator()
-            );
-            
-            // Calculate early exercise premium
-            double earlyExercisePremium = american_put.calculateEarlyExercisePremium(
-                S[i], K[i], r[i], q[i], vol[i], T[i], boundary);
-            
-            // American put value = European put value + early exercise premium
-            return std::max(european_prices[i], 0.0) + std::max(0.0, earlyExercisePremium);
-        });
+        };
+        
+        OptionParams params{S[i], K[i], r[i], q[i], vol[i], T[i], 0}; // 0 = PUT
+        
+        // Use thread-local cache
+        auto& cache = opt::getThreadLocalCache();
+        auto it = cache.find(params);
+        if (it != cache.end()) {
+            results[i] = it->second;
+            continue;
+        }
+        
+        // Skip full calculation if it's a European-only case
+        if (r[i] <= 0.0 && r[i] <= q[i]) {
+            results[i] = european_prices[i];
+            cache[params] = results[i];
+            continue;
+        }
+        
+        // Create American put model
+        mod::AmericanPutDouble american_put(scheme_->getPricingIntegrator());
+        
+        // Calculate early exercise boundary
+        auto boundary = american_put.calculateExerciseBoundary(
+            S[i], K[i], r[i], q[i], vol[i], T[i],
+            scheme_->getNumChebyshevNodes(),
+            scheme_->getNumFixedPointIterations(),
+            scheme_->getFixedPointIntegrator()
+        );
+        
+        // Calculate early exercise premium
+        double earlyExercisePremium = american_put.calculateEarlyExercisePremium(
+            S[i], K[i], r[i], q[i], vol[i], T[i], boundary);
+        
+        // American put value = European put value + early exercise premium
+        results[i] = std::max(european_prices[i], 0.0) + std::max(0.0, earlyExercisePremium);
+        
+        // Cache the result
+        cache[params] = results[i];
     }
 }
 
@@ -546,13 +609,8 @@ std::array<double, 4> ALOEngine::calculatePut4(
         if (rs[i] <= 0.0 && rs[i] <= qs[i]) {
             results[i] = blackScholesPut(spots[i], strikes[i], rs[i], qs[i], vols[i], Ts[i]);
         } else {
-            // Cache key
-            opt::OptionParams params{spots[i], strikes[i], rs[i], qs[i], vols[i], Ts[i], 0};
-            
-            // American option calculation with caching
-            results[i] = opt::getCachedPrice(params, [&, i]() {
-                return calculatePutImpl(spots[i], strikes[i], rs[i], qs[i], vols[i], Ts[i]);
-            });
+            // Use the full implementation
+            results[i] = calculatePutImpl(spots[i], strikes[i], rs[i], qs[i], vols[i], Ts[i]);
         }
     }
     
@@ -719,7 +777,18 @@ float ALOEngine::calculateAmericanSingle(double S, double K, double r, double q,
         // For put options, early exercise is potentially valuable when r > q
         if (r_f > q_f) {
             // Create a cache key for thread-local caching
-            opt::OptionKey key{S_f, K_f, r_f, q_f, vol_f, T_f, 0};
+            struct OptionKey {
+                float S, K, r, q, vol, T;
+                int type;
+                
+                bool operator==(const OptionKey& other) const {
+                    return S == other.S && K == other.K && r == other.r &&
+                           q == other.q && vol == other.vol && T == other.T &&
+                           type == other.type;
+                }
+            };
+            
+            OptionKey key{S_f, K_f, r_f, q_f, vol_f, T_f, 0};
             
             // Check if in cache
             auto& cache = opt::getThreadLocalCache();
@@ -751,7 +820,18 @@ float ALOEngine::calculateAmericanSingle(double S, double K, double r, double q,
         // For call options, early exercise is potentially valuable when q > 0
         if (q_f > 0.0f) {
             // Create a cache key for thread-local caching
-            opt::OptionKey key{S_f, K_f, r_f, q_f, vol_f, T_f, 1};
+            struct OptionKey {
+                float S, K, r, q, vol, T;
+                int type;
+                
+                bool operator==(const OptionKey& other) const {
+                    return S == other.S && K == other.K && r == other.r &&
+                           q == other.q && vol == other.vol && T == other.T &&
+                           type == other.type;
+                }
+            };
+            
+            OptionKey key{S_f, K_f, r_f, q_f, vol_f, T_f, 1};
             
             // Check if in cache
             auto& cache = opt::getThreadLocalCache();
@@ -917,13 +997,37 @@ std::vector<float> ALOEngine::parallelBatchCalculatePutSingle(
     return results;
 }
 
-// Implementation of single-precision batch processing without OpenMP
+// Implementation of single-precision batch processing
 std::vector<float> ALOEngine::batchCalculatePutFloat(
     float S, const std::vector<float>& strikes,
     float r, float q, float vol, float T) const {
     
     // Create batch in SoA layout
-    opt::OptionBatch batch;
+    struct OptionBatch {
+        std::vector<float> spots;
+        std::vector<float> strikes;
+        std::vector<float> rates;
+        std::vector<float> dividends;
+        std::vector<float> vols;
+        std::vector<float> times;
+        std::vector<float> results;
+        
+        void resize(size_t n) {
+            spots.resize(n);
+            strikes.resize(n);
+            rates.resize(n);
+            dividends.resize(n);
+            vols.resize(n);
+            times.resize(n);
+            results.resize(n);
+        }
+        
+        size_t size() const {
+            return strikes.size();
+        }
+    };
+    
+    OptionBatch batch;
     batch.resize(strikes.size());
     
     // Fill batch data
@@ -1014,8 +1118,47 @@ void ALOEngine::processAVX512Chunk(double S, const double* strikes, double r, do
         // Load strikes
         __m512d K_vec = _mm512_loadu_pd(strikes + i);
         
-        // Calculate put prices
-        __m512d result = opt::SimdOpsAVX512::bsPut(S_vec, K_vec, r_vec, q_vec, vol_vec, T_vec);
+        // Calculate put prices using an improved AVX-512 implementation
+        __m512d d1 = _mm512_div_pd(
+            _mm512_add_pd(
+                _mm512_log_pd(_mm512_div_pd(S_vec, K_vec)),
+                _mm512_mul_pd(
+                    _mm512_add_pd(
+                        _mm512_sub_pd(r_vec, q_vec),
+                        _mm512_mul_pd(_mm512_set1_pd(0.5), _mm512_mul_pd(vol_vec, vol_vec))
+                    ),
+                    T_vec
+                )
+            ),
+            _mm512_mul_pd(vol_vec, _mm512_sqrt_pd(T_vec))
+        );
+        
+        __m512d d2 = _mm512_sub_pd(d1, _mm512_mul_pd(vol_vec, _mm512_sqrt_pd(T_vec)));
+        
+        // Calculate e^(-r*T) and e^(-q*T)
+        __m512d er = _mm512_exp_pd(_mm512_mul_pd(_mm512_set1_pd(-1.0), _mm512_mul_pd(r_vec, T_vec)));
+        __m512d eq = _mm512_exp_pd(_mm512_mul_pd(_mm512_set1_pd(-1.0), _mm512_mul_pd(q_vec, T_vec)));
+        
+        // Calculate N(-d1) and N(-d2) using fast approximation
+        __m512d nd1 = _mm512_sub_pd(_mm512_set1_pd(1.0), 
+                                 _mm512_div_pd(_mm512_add_pd(_mm512_set1_pd(1.0), 
+                                                         _mm512_erf_pd(
+                                                             _mm512_div_pd(d1, _mm512_set1_pd(1.414213562))
+                                                         )),
+                                              _mm512_set1_pd(2.0)));
+        
+        __m512d nd2 = _mm512_sub_pd(_mm512_set1_pd(1.0), 
+                                 _mm512_div_pd(_mm512_add_pd(_mm512_set1_pd(1.0), 
+                                                         _mm512_erf_pd(
+                                                             _mm512_div_pd(d2, _mm512_set1_pd(1.414213562))
+                                                         )),
+                                              _mm512_set1_pd(2.0)));
+        
+        // Calculate Black-Scholes put price: K*e^(-r*T)*N(-d2) - S*e^(-q*T)*N(-d1)
+        __m512d result = _mm512_sub_pd(
+            _mm512_mul_pd(_mm512_mul_pd(K_vec, er), nd2),
+            _mm512_mul_pd(_mm512_mul_pd(S_vec, eq), nd1)
+        );
         
         // Store results
         _mm512_storeu_pd(results + i, result);

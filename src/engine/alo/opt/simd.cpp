@@ -4,9 +4,10 @@
 
 namespace engine {
 namespace alo {
-namespace opt {
+namespace num {
+namespace simd {
 
-__m256 num::simd::erf_ps(__m256 x) {
+__m256 erf_ps(__m256 x) {
   // Extract sign for later reconstruction
   __m256 sign_bit = _mm256_and_ps(x, _mm256_set1_ps(-0.0f));
 
@@ -37,7 +38,7 @@ __m256 num::simd::erf_ps(__m256 x) {
   // Calculate e^(-x^2)
   __m256 x_squared = _mm256_mul_ps(abs_x, abs_x);
   __m256 neg_x_squared = _mm256_mul_ps(x_squared, _mm256_set1_ps(-1.0f));
-  __m256 exp_term = num::simd::exp_ps(neg_x_squared);
+  __m256 exp_term = exp_ps(neg_x_squared);
 
   // Calculate final result: 1 - polynomial * exp(-x^2)
   __m256 result =
@@ -48,13 +49,13 @@ __m256 num::simd::erf_ps(__m256 x) {
 }
 
 // Implementation of normal_cdf_ps
-__m256 num::simd::normal_cdf_ps(__m256 x) {
+__m256 normal_cdf_ps(__m256 x) {
   // Scale factor for erf
   const __m256 SQRT2_INV = _mm256_set1_ps(0.7071067811865475f); // 1/sqrt(2)
 
   // Calculate erf(x/sqrt(2))
   __m256 scaled_x = _mm256_mul_ps(x, SQRT2_INV);
-  __m256 erf_result = num::simd::erf_ps(scaled_x);
+  __m256 erf_result = erf_ps(scaled_x);
 
   // Calculate 0.5 * (1 + erf(x/sqrt(2)))
   return _mm256_mul_ps(_mm256_set1_ps(0.5f),
@@ -62,7 +63,7 @@ __m256 num::simd::normal_cdf_ps(__m256 x) {
 }
 
 // Implementation of normal_pdf_ps
-__m256 num::simd::normal_pdf_ps(__m256 x) {
+__m256 normal_pdf_ps(__m256 x) {
   const __m256 NEG_HALF = _mm256_set1_ps(-0.5f);
   const __m256 INV_SQRT_2PI = _mm256_set1_ps(0.3989422804f); // 1/sqrt(2π)
 
@@ -73,14 +74,14 @@ __m256 num::simd::normal_pdf_ps(__m256 x) {
   __m256 exponent = _mm256_mul_ps(NEG_HALF, x_squared);
 
   // Calculate exp(-0.5 * x^2)
-  __m256 exp_term = num::simd::exp_ps(exponent);
+  __m256 exp_term = exp_ps(exponent);
 
   // Calculate exp(-0.5 * x^2) / sqrt(2π)
   return _mm256_mul_ps(exp_term, INV_SQRT_2PI);
 }
 
 // Implementation of exp_ps using polynomial approximation
-__m256 num::simd::exp_ps(__m256 x) {
+__m256 exp_ps(__m256 x) {
   // Clamp input to avoid overflow/underflow
   __m256 max_input = _mm256_set1_ps(88.3762626647949f);  // log(FLT_MAX)
   __m256 min_input = _mm256_set1_ps(-88.3762626647949f); // log(FLT_MIN)
@@ -133,7 +134,7 @@ __m256 num::simd::exp_ps(__m256 x) {
 }
 
 // Implementation of log_ps using polynomial approximation
-__m256 num::simd::log_ps(__m256 x) {
+__m256 log_ps(__m256 x) {
   // Handle special cases: x <= 0
   __m256 zero = _mm256_setzero_ps();
   __m256 mask_zero_or_neg = _mm256_cmp_ps(x, zero, _CMP_LE_OQ);
@@ -193,6 +194,10 @@ __m256 num::simd::log_ps(__m256 x) {
   return _mm256_blendv_ps(result, nan_value, mask_zero_or_neg);
 }
 
+} // namespace simd
+} // namespace num
+
+namespace opt {
 } // namespace opt
 } // namespace alo
 } // namespace engine

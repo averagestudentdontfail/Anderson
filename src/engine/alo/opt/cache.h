@@ -3,6 +3,7 @@
 
 #include <unordered_map>
 #include <functional>
+#include <cstdint>
 
 namespace engine {
 namespace alo {
