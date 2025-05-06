@@ -23,11 +23,11 @@ namespace engine {
 namespace alo {
  
 ALOIterationScheme::ALOIterationScheme(size_t n, size_t m, 
-                                      std::shared_ptr<num::Integrator> fpIntegrator,
-                                      std::shared_ptr<num::Integrator> pricingIntegrator)
+                                      std::shared_ptr<num::Integrate> fpIntegrate,
+                                      std::shared_ptr<num::Integrate> pricingIntegrate)
      : n_(n), m_(m), 
-       fpIntegrator_(fpIntegrator),
-       pricingIntegrator_(pricingIntegrator) {
+       fpIntegrate_(fpIntegrate),
+       pricingIntegrate_(pricingIntegrate) {
      
      if (n_ < 2) {
          throw std::invalid_argument("ALOIterationScheme: Number of Chebyshev nodes must be at least 2");
@@ -37,20 +37,20 @@ ALOIterationScheme::ALOIterationScheme(size_t n, size_t m,
          throw std::invalid_argument("ALOIterationScheme: Number of fixed point iterations must be at least 1");
      }
      
-     if (!fpIntegrator_) {
-         throw std::invalid_argument("ALOIterationScheme: Fixed point integrator cannot be null");
+     if (!fpIntegrate_) {
+         throw std::invalid_argument("ALOIterationScheme: Fixed point Integrate cannot be null");
      }
      
-     if (!pricingIntegrator_) {
-         throw std::invalid_argument("ALOIterationScheme: Pricing integrator cannot be null");
+     if (!pricingIntegrate_) {
+         throw std::invalid_argument("ALOIterationScheme: Pricing Integrate cannot be null");
      }
 }
  
 std::string ALOIterationScheme::getDescription() const {
      return "ChebyshevNodes: " + std::to_string(n_) + 
             ", FixedPointIterations: " + std::to_string(m_) +
-            ", FPIntegrator: " + fpIntegrator_->name() +
-            ", PricingIntegrator: " + pricingIntegrator_->name();
+            ", FPIntegrate: " + fpIntegrate_->name() +
+            ", PricingIntegrate: " + pricingIntegrate_->name();
 }
  
 ALOEngine::ALOEngine(ALOScheme scheme, FixedPointEquation eq) 
@@ -136,10 +136,10 @@ double ALOEngine::blackScholesCall(double S, double K, double r, double q, doubl
 std::shared_ptr<ALOIterationScheme> ALOEngine::createFastScheme() {
     // Legendre-Legendre (7,2,7)-27 scheme
     try {
-        auto fpIntegrator = num::createIntegratorSingle("GaussLegendre", 7);
-        auto pricingIntegrator = num::createIntegratorSingle("GaussLegendre", 27);
+        auto fpIntegrate = num::createIntegrateSingle("GaussLegendre", 7);
+        auto pricingIntegrate = num::createIntegrateSingle("GaussLegendre", 27);
         
-        return std::make_shared<ALOIterationScheme>(7, 2, fpIntegrator, pricingIntegrator);
+        return std::make_shared<ALOIterationScheme>(7, 2, fpIntegrate, pricingIntegrate);
     } catch (const std::exception& e) {
         throw std::runtime_error(std::string("Error creating fast scheme: ") + e.what());
     }
@@ -148,10 +148,10 @@ std::shared_ptr<ALOIterationScheme> ALOEngine::createFastScheme() {
 std::shared_ptr<ALOIterationScheme> ALOEngine::createAccurateScheme() {
     // Legendre-TanhSinh (25,5,13)-1e-8 scheme
     try {
-        auto fpIntegrator = num::createIntegratorSingle("GaussLegendre", 25);
-        auto pricingIntegrator = num::createIntegratorSingle("TanhSinh", 0, 1e-8);
+        auto fpIntegrate = num::createIntegrateSingle("GaussLegendre", 25);
+        auto pricingIntegrate = num::createIntegrateSingle("TanhSinh", 0, 1e-8);
         
-        return std::make_shared<ALOIterationScheme>(13, 5, fpIntegrator, pricingIntegrator);
+        return std::make_shared<ALOIterationScheme>(13, 5, fpIntegrate, pricingIntegrate);
     } catch (const std::exception& e) {
         throw std::runtime_error(std::string("Error creating accurate scheme: ") + e.what());
     }
@@ -160,10 +160,10 @@ std::shared_ptr<ALOIterationScheme> ALOEngine::createAccurateScheme() {
 std::shared_ptr<ALOIterationScheme> ALOEngine::createHighPrecisionScheme() {
     // TanhSinh-TanhSinh (10,30)-1e-10 scheme
     try {
-        auto fpIntegrator = num::createIntegratorSingle("TanhSinh", 0, 1e-10);
-        auto pricingIntegrator = num::createIntegratorSingle("TanhSinh", 0, 1e-10);
+        auto fpIntegrate = num::createIntegrateSingle("TanhSinh", 0, 1e-10);
+        auto pricingIntegrate = num::createIntegrateSingle("TanhSinh", 0, 1e-10);
         
-        return std::make_shared<ALOIterationScheme>(30, 10, fpIntegrator, pricingIntegrator);
+        return std::make_shared<ALOIterationScheme>(30, 10, fpIntegrate, pricingIntegrate);
     } catch (const std::exception& e) {
         throw std::runtime_error(std::string("Error creating high precision scheme: ") + e.what());
     }
@@ -264,14 +264,14 @@ double ALOEngine::calculatePutImpl(double S, double K, double r, double q, doubl
     }
     
     // Create American put model
-    mod::AmericanPutDouble american_put(scheme_->getPricingIntegrator());
+    mod::AmericanPutDouble american_put(scheme_->getPricingIntegrate());
     
     // Calculate early exercise boundary
     auto boundary = american_put.calculateExerciseBoundary(
         S, K, r, q, vol, T,
         scheme_->getNumChebyshevNodes(),
         scheme_->getNumFixedPointIterations(),
-        scheme_->getFixedPointIntegrator()
+        scheme_->getFixedPointIntegrate()
     );
     
     // Calculate early exercise premium
@@ -334,14 +334,14 @@ double ALOEngine::calculateCallImpl(double S, double K, double r, double q, doub
     }
     
     // Create American call model
-    mod::AmericanCallDouble american_call(scheme_->getPricingIntegrator());
+    mod::AmericanCallDouble american_call(scheme_->getPricingIntegrate());
     
     // Calculate early exercise boundary
     auto boundary = american_call.calculateExerciseBoundary(
         S, K, r, q, vol, T,
         scheme_->getNumChebyshevNodes(),
         scheme_->getNumFixedPointIterations(),
-        scheme_->getFixedPointIntegrator()
+        scheme_->getFixedPointIntegrate()
     );
     
     // Calculate early exercise premium
@@ -402,14 +402,14 @@ void ALOEngine::processAmericanPutChunk(const double* S, const double* K, const 
         }
         
         // Create American put model
-        mod::AmericanPutDouble american_put(scheme_->getPricingIntegrator());
+        mod::AmericanPutDouble american_put(scheme_->getPricingIntegrate());
         
         // Calculate early exercise boundary
         auto boundary = american_put.calculateExerciseBoundary(
             S[i], K[i], r[i], q[i], vol[i], T[i],
             scheme_->getNumChebyshevNodes(),
             scheme_->getNumFixedPointIterations(),
-            scheme_->getFixedPointIntegrator()
+            scheme_->getFixedPointIntegrate()
         );
         
         // Calculate early exercise premium
@@ -1259,18 +1259,18 @@ std::shared_ptr<ALOEngine::FixedPointEvaluator> ALOEngine::createFixedPointEvalu
     
     // Create appropriate evaluator
     if (eq == FP_A) {
-        return std::make_shared<EquationA>(K, r, q, vol, B, scheme_->getFixedPointIntegrator());
+        return std::make_shared<EquationA>(K, r, q, vol, B, scheme_->getFixedPointIntegrate());
     } else {
-        return std::make_shared<EquationB>(K, r, q, vol, B, scheme_->getFixedPointIntegrator());
+        return std::make_shared<EquationB>(K, r, q, vol, B, scheme_->getFixedPointIntegrate());
     }
 }
  
 ALOEngine::FixedPointEvaluator::FixedPointEvaluator(
     double K, double r, double q, double vol, 
     const std::function<double(double)>& B,
-    std::shared_ptr<num::Integrator> integrator)
+    std::shared_ptr<num::Integrate> Integrate)
     : K_(K), r_(r), q_(q), vol_(vol), vol2_(vol * vol), 
-      B_(B), integrator_(integrator) {}
+      B_(B), Integrate_(Integrate) {}
  
 std::pair<double, double> ALOEngine::FixedPointEvaluator::d(double t, double z) const {
     if (t <= 0.0 || z <= 0.0) {
@@ -1295,8 +1295,8 @@ double ALOEngine::FixedPointEvaluator::normalPDF(double x) const {
 ALOEngine::EquationA::EquationA(
     double K, double r, double q, double vol, 
     const std::function<double(double)>& B,
-    std::shared_ptr<num::Integrator> integrator)
-    : FixedPointEvaluator(K, r, q, vol, B, integrator) {}
+    std::shared_ptr<num::Integrate> Integrate)
+    : FixedPointEvaluator(K, r, q, vol, B, Integrate) {}
  
 std::tuple<double, double, double> ALOEngine::EquationA::evaluate(double tau, double b) const {
     double N, D;
@@ -1345,8 +1345,8 @@ std::tuple<double, double, double> ALOEngine::EquationA::evaluate(double tau, do
             }
         };
         
-        double K12 = integrator_->integrate(K12_integrand, -1.0, 1.0);
-        double K3 = integrator_->integrate(K3_integrand, -1.0, 1.0);
+        double K12 = Integrate_->integrate(K12_integrand, -1.0, 1.0);
+        double K3 = Integrate_->integrate(K3_integrand, -1.0, 1.0);
         
         const auto dpm = d(tau, b / K_);
         N = normalPDF(dpm.second) / vol_ / std::sqrt(tau) + r_ * K3;
@@ -1401,8 +1401,8 @@ std::pair<double, double> ALOEngine::EquationA::derivatives(double tau, double b
 ALOEngine::EquationB::EquationB(
     double K, double r, double q, double vol, 
     const std::function<double(double)>& B,
-    std::shared_ptr<num::Integrator> integrator)
-    : FixedPointEvaluator(K, r, q, vol, B, integrator) {}
+    std::shared_ptr<num::Integrate> Integrate)
+    : FixedPointEvaluator(K, r, q, vol, B, Integrate) {}
  
 std::tuple<double, double, double> ALOEngine::EquationB::evaluate(double tau, double b) const {
     double N, D;
@@ -1445,8 +1445,8 @@ std::tuple<double, double, double> ALOEngine::EquationB::evaluate(double tau, do
             }
         };
         
-        double ni = integrator_->integrate(N_integrand, 0.0, tau);
-        double di = integrator_->integrate(D_integrand, 0.0, tau);
+        double ni = Integrate_->integrate(N_integrand, 0.0, tau);
+        double di = Integrate_->integrate(D_integrand, 0.0, tau);
         
         const auto dpm = d(tau, b / K_);
         

@@ -1,5 +1,5 @@
-#ifndef ENGINE_ALO_NUM_INTEGRATOR_H
-#define ENGINE_ALO_NUM_INTEGRATOR_H
+#ifndef ENGINE_ALO_NUM_INTEGRATE_H
+#define ENGINE_ALO_NUM_INTEGRATE_H
 
 #include <functional>
 #include <memory>
@@ -16,12 +16,12 @@ namespace num {
  * in the ALO engine. The implementations must follow deterministic
  * execution principles to ensure consistent results.
  */
-class IntegratorDouble {
+class IntegrateDouble {
 public:
   /**
    * @brief Virtual destructor
    */
-  virtual ~IntegratorDouble() = default;
+  virtual ~IntegrateDouble() = default;
 
   /**
    * @brief Integrate a function over an interval
@@ -35,37 +35,37 @@ public:
                            double b) const = 0;
 
   /**
-   * @brief Get the name of the integrator
+   * @brief Get the name of the Integrate
    *
-   * @return Integrator name
+   * @return Integrate name
    */
   virtual std::string name() const = 0;
 };
 
 /**
- * @brief Create a double-precision integrator of the specified type
+ * @brief Create a double-precision Integrate of the specified type
  *
- * Factory function to create instances of various integrator implementations.
+ * Factory function to create instances of various Integrate implementations.
  *
  * @param scheme_type Type of integration scheme ("GaussLegendre", "TanhSinh",
  * "GSLQAGS")
  * @param order Number of integration points (for fixed-point schemes)
  * @param tolerance Error tolerance (for adaptive schemes)
- * @return Shared pointer to integrator instance
+ * @return Shared pointer to Integrate instance
  */
-std::shared_ptr<IntegratorDouble>
-createIntegratorDouble(const std::string &scheme_type, size_t order = 0,
+std::shared_ptr<IntegrateDouble>
+createIntegrateDouble(const std::string &scheme_type, size_t order = 0,
                        double tolerance = 0.0);
 
 /**
  * @brief Abstract base class for single-precision numerical integration
  */
-class IntegratorSingle {
+class IntegrateSingle {
 public:
   /**
    * @brief Virtual destructor
    */
-  virtual ~IntegratorSingle() = default;
+  virtual ~IntegrateSingle() = default;
 
   /**
    * @brief Integrate a function over an interval
@@ -79,9 +79,9 @@ public:
                           float b) const = 0;
 
   /**
-   * @brief Get the name of the integrator
+   * @brief Get the name of the Integrate
    *
-   * @return Integrator name
+   * @return Integrate name
    */
   virtual std::string name() const = 0;
 
@@ -100,19 +100,19 @@ public:
 };
 
 /**
- * @brief Create a single-precision integrator of the specified type
+ * @brief Create a single-precision Integrate of the specified type
  *
  * @param scheme_type Type of integration scheme ("GaussLegendre", "Adaptive")
  * @param order Number of integration points (for fixed-point schemes)
  * @param tolerance Error tolerance (for adaptive schemes)
- * @return Shared pointer to single-precision integrator instance
+ * @return Shared pointer to single-precision Integrate instance
  */
-std::shared_ptr<IntegratorSingle>
-createIntegratorSingle(const std::string &scheme_type, size_t order = 0,
+std::shared_ptr<IntegrateSingle>
+createIntegrateSingle(const std::string &scheme_type, size_t order = 0,
                        float tolerance = 0.0f);
 
 } // namespace num
 } // namespace alo
 } // namespace engine
 
-#endif // ENGINE_ALO_NUM_INTEGRATOR_H
+#endif // ENGINE_ALO_NUM_INTEGRATE_H

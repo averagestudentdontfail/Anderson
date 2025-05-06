@@ -22,7 +22,7 @@
 namespace engine {
 namespace alo {
 namespace num {
-    class Integrator;
+    class Integrate;
     class ChebyshevInterpolation;
 }
 
@@ -56,18 +56,18 @@ public:
      * 
      * @param n Number of Chebyshev nodes
      * @param m Number of fixed point iterations
-     * @param fpIntegrator Integrator for fixed point equation
-     * @param pricingIntegrator Integrator for pricing
+     * @param fpIntegrate Integrate for fixed point equation
+     * @param pricingIntegrate Integrate for pricing
      */
     ALOIterationScheme(size_t n, size_t m, 
-                       std::shared_ptr<num::Integrator> fpIntegrator,
-                       std::shared_ptr<num::Integrator> pricingIntegrator);
+                       std::shared_ptr<num::Integrate> fpIntegrate,
+                       std::shared_ptr<num::Integrate> pricingIntegrate);
     
     // Getters
     size_t getNumChebyshevNodes() const { return n_; }
     size_t getNumFixedPointIterations() const { return m_; }
-    std::shared_ptr<num::Integrator> getFixedPointIntegrator() const { return fpIntegrator_; }
-    std::shared_ptr<num::Integrator> getPricingIntegrator() const { return pricingIntegrator_; }
+    std::shared_ptr<num::Integrate> getFixedPointIntegrate() const { return fpIntegrate_; }
+    std::shared_ptr<num::Integrate> getPricingIntegrate() const { return pricingIntegrate_; }
     
     /**
      * @brief Get a string description of the scheme
@@ -78,8 +78,8 @@ public:
 private:
     size_t n_; ///< Number of Chebyshev nodes
     size_t m_; ///< Total number of fixed point iterations
-    std::shared_ptr<num::Integrator> fpIntegrator_; ///< Integrator for fixed point equation
-    std::shared_ptr<num::Integrator> pricingIntegrator_; ///< Integrator for pricing
+    std::shared_ptr<num::Integrate> fpIntegrate_; ///< Integrate for fixed point equation
+    std::shared_ptr<num::Integrate> pricingIntegrate_; ///< Integrate for pricing
 };
 
 /**
@@ -480,7 +480,7 @@ private:
     public:
         FixedPointEvaluator(double K, double r, double q, double vol, 
                           const std::function<double(double)>& B,
-                          std::shared_ptr<num::Integrator> integrator);
+                          std::shared_ptr<num::Integrate> Integrate);
         
         virtual ~FixedPointEvaluator() = default;
         
@@ -498,7 +498,7 @@ private:
         double vol_;
         double vol2_; // vol^2, precomputed
         std::function<double(double)> B_;
-        std::shared_ptr<num::Integrator> integrator_;
+        std::shared_ptr<num::Integrate> Integrate_;
         
         // Normal distribution functions
         double normalCDF(double x) const;
@@ -513,7 +513,7 @@ private:
     public:
         EquationA(double K, double r, double q, double vol, 
                  const std::function<double(double)>& B,
-                 std::shared_ptr<num::Integrator> integrator);
+                 std::shared_ptr<num::Integrate> Integrate);
         
         std::tuple<double, double, double> evaluate(double tau, double b) const override;
         std::pair<double, double> derivatives(double tau, double b) const override;
@@ -527,7 +527,7 @@ private:
     public:
         EquationB(double K, double r, double q, double vol, 
                  const std::function<double(double)>& B,
-                 std::shared_ptr<num::Integrator> integrator);
+                 std::shared_ptr<num::Integrate> Integrate);
         
         std::tuple<double, double, double> evaluate(double tau, double b) const override;
         std::pair<double, double> derivatives(double tau, double b) const override;
