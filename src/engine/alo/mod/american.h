@@ -24,9 +24,9 @@ public:
   /**
    * @brief Constructor
    *
-   * @param integrator Integrator for calculating the early exercise premium
+   * @param Integrate Integrate for calculating the early exercise premium
    */
-  explicit AmericanOptionDouble(std::shared_ptr<num::Integrator> integrator);
+  explicit AmericanOptionDouble(std::shared_ptr<num::Integrate> Integrate);
 
   /**
    * @brief Destructor
@@ -47,7 +47,7 @@ public:
   calculateExerciseBoundary(
       double S, double K, double r, double q, double vol, double T,
       size_t num_nodes, size_t num_iterations,
-      std::shared_ptr<num::Integrator> fpIntegrator) const = 0;
+      std::shared_ptr<num::Integrate> fpIntegrate) const = 0;
 
   /**
    * @brief Calculate the maximum early exercise boundary value
@@ -55,12 +55,12 @@ public:
   virtual double xMax(double K, double r, double q) const = 0;
 
   /**
-   * @brief Get the integrator
+   * @brief Get the Integrate
    */
-  std::shared_ptr<num::Integrator> getIntegrator() const { return integrator_; }
+  std::shared_ptr<num::Integrate> getIntegrate() const { return Integrate_; }
 
 protected:
-  std::shared_ptr<num::Integrator> integrator_;
+  std::shared_ptr<num::Integrate> Integrate_;
 };
 
 /**
@@ -74,9 +74,9 @@ public:
   /**
    * @brief Constructor
    *
-   * @param integrator Integrator for calculating the early exercise premium
+   * @param Integrate Integrate for calculating the early exercise premium
    */
-  explicit AmericanPutDouble(std::shared_ptr<num::Integrator> integrator);
+  explicit AmericanPutDouble(std::shared_ptr<num::Integrate> Integrate);
 
   /**
    * @brief Calculate the early exercise premium
@@ -92,7 +92,7 @@ public:
   std::shared_ptr<num::ChebyshevInterpolation> calculateExerciseBoundary(
       double S, double K, double r, double q, double vol, double T,
       size_t num_nodes, size_t num_iterations,
-      std::shared_ptr<num::Integrator> fpIntegrator) const override;
+      std::shared_ptr<num::Integrate> fpIntegrate) const override;
 
   /**
    * @brief Calculate the maximum early exercise boundary value
@@ -111,9 +111,9 @@ public:
   /**
    * @brief Constructor
    *
-   * @param integrator Integrator for calculating the early exercise premium
+   * @param Integrate Integrate for calculating the early exercise premium
    */
-  explicit AmericanCallDouble(std::shared_ptr<num::Integrator> integrator);
+  explicit AmericanCallDouble(std::shared_ptr<num::Integrate> Integrate);
 
   /**
    * @brief Calculate the early exercise premium
@@ -129,7 +129,7 @@ public:
   std::shared_ptr<num::ChebyshevInterpolation> calculateExerciseBoundary(
       double S, double K, double r, double q, double vol, double T,
       size_t num_nodes, size_t num_iterations,
-      std::shared_ptr<num::Integrator> fpIntegrator) const override;
+      std::shared_ptr<num::Integrate> fpIntegrate) const override;
 
   /**
    * @brief Calculate the maximum early exercise boundary value
@@ -151,7 +151,7 @@ public:
    */
   FixedPointEvaluatorDouble(double K, double r, double q, double vol,
                             const std::function<double(double)> &B,
-                            std::shared_ptr<num::Integrator> integrator);
+                            std::shared_ptr<num::Integrate> Integrate);
 
   /**
    * @brief Destructor
@@ -192,7 +192,7 @@ protected:
   double vol_;
   double vol2_; // vol^2, precomputed
   std::function<double(double)> B_;
-  std::shared_ptr<num::Integrator> integrator_;
+  std::shared_ptr<num::Integrate> Integrate_;
 };
 
 /**
@@ -206,7 +206,7 @@ public:
    */
   EquationADouble(double K, double r, double q, double vol,
                   const std::function<double(double)> &B,
-                  std::shared_ptr<num::Integrator> integrator);
+                  std::shared_ptr<num::Integrate> Integrate);
 
   /**
    * @brief Evaluate the fixed point equation
@@ -231,7 +231,7 @@ public:
    */
   EquationBDouble(double K, double r, double q, double vol,
                   const std::function<double(double)> &B,
-                  std::shared_ptr<num::Integrator> integrator);
+                  std::shared_ptr<num::Integrate> Integrate);
 
   /**
    * @brief Evaluate the fixed point equation
@@ -252,7 +252,7 @@ std::shared_ptr<FixedPointEvaluatorDouble>
 createFixedPointEvaluatorDouble(char equation, double K, double r, double q,
                                 double vol,
                                 const std::function<double(double)> &B,
-                                std::shared_ptr<num::Integrator> integrator);
+                                std::shared_ptr<num::Integrate> Integrate);
 
 /**
  * @class AmericanOptionSingle
@@ -267,7 +267,7 @@ public:
    * @brief Constructor
    */
   explicit AmericanOptionSingle(
-      std::shared_ptr<num::IntegratorFloat> integrator);
+      std::shared_ptr<num::IntegrateFloat> Integrate);
 
   /**
    * @brief Destructor
@@ -289,7 +289,7 @@ public:
   calculateExerciseBoundary(
       float S, float K, float r, float q, float vol, float T, size_t num_nodes,
       size_t num_iterations,
-      std::shared_ptr<num::IntegratorFloat> fpIntegrator) const = 0;
+      std::shared_ptr<num::IntegrateFloat> fpIntegrate) const = 0;
 
   /**
    * @brief Calculate the maximum early exercise boundary value
@@ -297,14 +297,14 @@ public:
   virtual float xMax(float K, float r, float q) const = 0;
 
   /**
-   * @brief Get the integrator
+   * @brief Get the Integrate
    */
-  std::shared_ptr<num::IntegratorFloat> getIntegrator() const {
-    return integrator_;
+  std::shared_ptr<num::IntegrateFloat> getIntegrate() const {
+    return Integrate_;
   }
 
 protected:
-  std::shared_ptr<num::IntegratorFloat> integrator_;
+  std::shared_ptr<num::IntegrateFloat> Integrate_;
 };
 
 /**
@@ -319,7 +319,7 @@ public:
   /**
    * @brief Constructor
    */
-  explicit AmericanPutSingle(std::shared_ptr<num::IntegratorFloat> integrator);
+  explicit AmericanPutSingle(std::shared_ptr<num::IntegrateFloat> Integrate);
 
   /**
    * @brief Calculate the early exercise premium
@@ -335,7 +335,7 @@ public:
   std::shared_ptr<num::ChebyshevInterpolationFloat> calculateExerciseBoundary(
       float S, float K, float r, float q, float vol, float T, size_t num_nodes,
       size_t num_iterations,
-      std::shared_ptr<num::IntegratorFloat> fpIntegrator) const override;
+      std::shared_ptr<num::IntegrateFloat> fpIntegrate) const override;
 
   /**
    * @brief Calculate the maximum early exercise boundary value
@@ -369,7 +369,7 @@ public:
   /**
    * @brief Constructor
    */
-  explicit AmericanCallSingle(std::shared_ptr<num::IntegratorFloat> integrator);
+  explicit AmericanCallSingle(std::shared_ptr<num::IntegrateFloat> Integrate);
 
   /**
    * @brief Calculate the early exercise premium
@@ -385,7 +385,7 @@ public:
   std::shared_ptr<num::ChebyshevInterpolationFloat> calculateExerciseBoundary(
       float S, float K, float r, float q, float vol, float T, size_t num_nodes,
       size_t num_iterations,
-      std::shared_ptr<num::IntegratorFloat> fpIntegrator) const override;
+      std::shared_ptr<num::IntegrateFloat> fpIntegrate) const override;
 
   /**
    * @brief Calculate the maximum early exercise boundary value
@@ -422,7 +422,7 @@ public:
    */
   FixedPointEvaluatorSingle(float K, float r, float q, float vol,
                             const std::function<float(float)> &B,
-                            std::shared_ptr<num::IntegratorFloat> integrator);
+                            std::shared_ptr<num::IntegrateFloat> Integrate);
 
   /**
    * @brief Destructor
@@ -463,7 +463,7 @@ protected:
   float vol_;
   float vol2_; // vol^2, precomputed
   std::function<float(float)> B_;
-  std::shared_ptr<num::IntegratorFloat> integrator_;
+  std::shared_ptr<num::IntegrateFloat> Integrate_;
 };
 
 /**
@@ -477,7 +477,7 @@ public:
    */
   EquationASingle(float K, float r, float q, float vol,
                   const std::function<float(float)> &B,
-                  std::shared_ptr<num::IntegratorFloat> integrator);
+                  std::shared_ptr<num::IntegrateFloat> Integrate);
 
   /**
    * @brief Evaluate the fixed point equation
@@ -501,7 +501,7 @@ public:
    */
   EquationBSingle(float K, float r, float q, float vol,
                   const std::function<float(float)> &B,
-                  std::shared_ptr<num::IntegratorFloat> integrator);
+                  std::shared_ptr<num::IntegrateFloat> Integrate);
 
   /**
    * @brief Evaluate the fixed point equation
@@ -520,7 +520,7 @@ public:
 std::shared_ptr<FixedPointEvaluatorSingle> createFixedPointEvaluatorSingle(
     char equation, float K, float r, float q, float vol,
     const std::function<float(float)> &B,
-    std::shared_ptr<num::IntegratorFloat> integrator);
+    std::shared_ptr<num::IntegrateFloat> Integrate);
 
 } // namespace mod
 } // namespace alo
