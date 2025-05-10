@@ -1,12 +1,13 @@
 #ifndef ENGINE_ALO_MOD_AMERICAN_H
 #define ENGINE_ALO_MOD_AMERICAN_H
 
-#include "../num/chebyshev.h"
-#include "../num/integrate.h"
+#include "../num/chebyshev.h" 
+#include "../num/integrate.h" 
 #include <array>
 #include <functional>
 #include <memory>
 #include <vector>
+#include <tuple>
 
 namespace engine {
 namespace alo {
@@ -15,512 +16,245 @@ namespace mod {
 /**
  * @class AmericanOptionDouble
  * @brief Base class for double-precision American option pricing models
- *
- * This class provides common functionality for American option pricing
- * using the Anderson-Lake-Offengelden algorithm.
  */
 class AmericanOptionDouble {
 public:
-  /**
-   * @brief Constructor
-   *
-   * @param Integrate Integrate for calculating the early exercise premium
-   */
-  explicit AmericanOptionDouble(std::shared_ptr<num::Integrate> Integrate);
-
-  /**
-   * @brief Destructor
-   */
+  explicit AmericanOptionDouble(std::shared_ptr<num::IntegrateDouble> integrate_pricing);
   virtual ~AmericanOptionDouble() = default;
 
-  /**
-   * @brief Calculate the early exercise premium
-   */
   virtual double calculateEarlyExercisePremium(
       double S, double K, double r, double q, double vol, double T,
-      const std::shared_ptr<num::ChebyshevInterpolation> &boundary) const = 0;
+      const std::shared_ptr<num::ChebyshevInterpolationDouble> &boundary) const = 0;
 
-  /**
-   * @brief Calculate the early exercise boundary
-   */
-  virtual std::shared_ptr<num::ChebyshevInterpolation>
+  virtual std::shared_ptr<num::ChebyshevInterpolationDouble>
   calculateExerciseBoundary(
       double S, double K, double r, double q, double vol, double T,
       size_t num_nodes, size_t num_iterations,
-      std::shared_ptr<num::Integrate> fpIntegrate) const = 0;
+      std::shared_ptr<num::IntegrateDouble> integrate_fp) const = 0; // separate integrator for FP
 
-  /**
-   * @brief Calculate the maximum early exercise boundary value
-   */
   virtual double xMax(double K, double r, double q) const = 0;
-
-  /**
-   * @brief Get the Integrate
-   */
-  std::shared_ptr<num::Integrate> getIntegrate() const { return Integrate_; }
+  std::shared_ptr<num::IntegrateDouble> getPricingIntegrate() const { return integrate_pricing_; }
 
 protected:
-  std::shared_ptr<num::Integrate> Integrate_;
+  std::shared_ptr<num::IntegrateDouble> integrate_pricing_; // Renamed for clarity
 };
 
 /**
  * @class AmericanPutDouble
- * @brief Double-precision American put option pricing model
- *
- * This class implements American put option pricing using the ALO algorithm.
  */
 class AmericanPutDouble : public AmericanOptionDouble {
 public:
-  /**
-   * @brief Constructor
-   *
-   * @param Integrate Integrate for calculating the early exercise premium
-   */
-  explicit AmericanPutDouble(std::shared_ptr<num::Integrate> Integrate);
-
-  /**
-   * @brief Calculate the early exercise premium
-   */
+  explicit AmericanPutDouble(std::shared_ptr<num::IntegrateDouble> integrate_pricing);
   double calculateEarlyExercisePremium(
       double S, double K, double r, double q, double vol, double T,
-      const std::shared_ptr<num::ChebyshevInterpolation> &boundary)
-      const override;
-
-  /**
-   * @brief Calculate the early exercise boundary
-   */
-  std::shared_ptr<num::ChebyshevInterpolation> calculateExerciseBoundary(
+      const std::shared_ptr<num::ChebyshevInterpolationDouble> &boundary) const override;
+  std::shared_ptr<num::ChebyshevInterpolationDouble> calculateExerciseBoundary(
       double S, double K, double r, double q, double vol, double T,
       size_t num_nodes, size_t num_iterations,
-      std::shared_ptr<num::Integrate> fpIntegrate) const override;
-
-  /**
-   * @brief Calculate the maximum early exercise boundary value
-   */
+      std::shared_ptr<num::IntegrateDouble> integrate_fp) const override;
   double xMax(double K, double r, double q) const override;
 };
 
 /**
  * @class AmericanCallDouble
- * @brief Double-precision American call option pricing model
- *
- * This class implements American call option pricing using the ALO algorithm.
  */
 class AmericanCallDouble : public AmericanOptionDouble {
 public:
-  /**
-   * @brief Constructor
-   *
-   * @param Integrate Integrate for calculating the early exercise premium
-   */
-  explicit AmericanCallDouble(std::shared_ptr<num::Integrate> Integrate);
-
-  /**
-   * @brief Calculate the early exercise premium
-   */
+  explicit AmericanCallDouble(std::shared_ptr<num::IntegrateDouble> integrate_pricing);
   double calculateEarlyExercisePremium(
       double S, double K, double r, double q, double vol, double T,
-      const std::shared_ptr<num::ChebyshevInterpolation> &boundary)
-      const override;
-
-  /**
-   * @brief Calculate the early exercise boundary
-   */
-  std::shared_ptr<num::ChebyshevInterpolation> calculateExerciseBoundary(
+      const std::shared_ptr<num::ChebyshevInterpolationDouble> &boundary) const override;
+  std::shared_ptr<num::ChebyshevInterpolationDouble> calculateExerciseBoundary(
       double S, double K, double r, double q, double vol, double T,
       size_t num_nodes, size_t num_iterations,
-      std::shared_ptr<num::Integrate> fpIntegrate) const override;
-
-  /**
-   * @brief Calculate the maximum early exercise boundary value
-   */
+      std::shared_ptr<num::IntegrateDouble> integrate_fp) const override;
   double xMax(double K, double r, double q) const override;
 };
 
 /**
  * @class FixedPointEvaluatorDouble
- * @brief Base class for double-precision fixed point equation evaluators
- *
- * This class defines the interface for fixed point equation evaluators
- * used in the ALO algorithm to compute early exercise boundaries.
  */
 class FixedPointEvaluatorDouble {
 public:
-  /**
-   * @brief Constructor
-   */
-  FixedPointEvaluatorDouble(double K, double r, double q, double vol,
-                            const std::function<double(double)> &B,
-                            std::shared_ptr<num::Integrate> Integrate);
-
-  /**
-   * @brief Destructor
-   */
+  FixedPointEvaluatorDouble(double K_val, double r_val, double q_val, double vol_val,
+                            const std::function<double(double)> &B_func, // Boundary func
+                            std::shared_ptr<num::IntegrateDouble> integrate_instance);
   virtual ~FixedPointEvaluatorDouble() = default;
-
-  /**
-   * @brief Evaluate the fixed point equation
-   */
-  virtual std::tuple<double, double, double> evaluate(double tau,
-                                                      double b) const = 0;
-
-  /**
-   * @brief Calculate derivatives of the fixed point equation
-   */
-  virtual std::pair<double, double> derivatives(double tau, double b) const = 0;
+  virtual std::tuple<double, double, double> evaluate(double tau, double b) const = 0; // Returns N, D, f_v
+  virtual std::pair<double, double> derivatives(double tau, double b) const = 0;    // Returns N', D'
 
 protected:
-  /**
-   * @brief Calculate d1 and d2 terms for Black-Scholes
-   */
-  std::pair<double, double> d(double t, double z) const;
-
-  /**
-   * @brief Calculate normal CDF
-   */
+  std::pair<double, double> d_black_scholes(double t, double spot_ratio_K) const; // Renamed for clarity
   double normalCDF(double x) const;
-
-  /**
-   * @brief Calculate normal PDF
-   */
   double normalPDF(double x) const;
 
-  // Member variables
-  double K_;
-  double r_;
-  double q_;
-  double vol_;
-  double vol2_; // vol^2, precomputed
-  std::function<double(double)> B_;
-  std::shared_ptr<num::Integrate> Integrate_;
+  double K_value_; // Renamed members to avoid conflict with params
+  double r_rate_;
+  double q_yield_;
+  double volatility_;
+  double vol_sq_; 
+  std::function<double(double)> B_boundary_func_; // Renamed
+  std::shared_ptr<num::IntegrateDouble> integrate_fp_; // Renamed
 };
 
 /**
  * @class EquationADouble
- * @brief Double-precision implementation of Equation A from the ALO paper
  */
 class EquationADouble : public FixedPointEvaluatorDouble {
 public:
-  /**
-   * @brief Constructor
-   */
-  EquationADouble(double K, double r, double q, double vol,
-                  const std::function<double(double)> &B,
-                  std::shared_ptr<num::Integrate> Integrate);
-
-  /**
-   * @brief Evaluate the fixed point equation
-   */
-  std::tuple<double, double, double> evaluate(double tau,
-                                              double b) const override;
-
-  /**
-   * @brief Calculate derivatives of the fixed point equation
-   */
+  EquationADouble(double K_val, double r_val, double q_val, double vol_val,
+                  const std::function<double(double)> &B_func,
+                  std::shared_ptr<num::IntegrateDouble> integrate_instance);
+  std::tuple<double, double, double> evaluate(double tau, double b) const override;
   std::pair<double, double> derivatives(double tau, double b) const override;
 };
 
 /**
  * @class EquationBDouble
- * @brief Double-precision implementation of Equation B from the ALO paper
  */
 class EquationBDouble : public FixedPointEvaluatorDouble {
 public:
-  /**
-   * @brief Constructor
-   */
-  EquationBDouble(double K, double r, double q, double vol,
-                  const std::function<double(double)> &B,
-                  std::shared_ptr<num::Integrate> Integrate);
-
-  /**
-   * @brief Evaluate the fixed point equation
-   */
-  std::tuple<double, double, double> evaluate(double tau,
-                                              double b) const override;
-
-  /**
-   * @brief Calculate derivatives of the fixed point equation
-   */
+  EquationBDouble(double K_val, double r_val, double q_val, double vol_val,
+                  const std::function<double(double)> &B_func,
+                  std::shared_ptr<num::IntegrateDouble> integrate_instance);
+  std::tuple<double, double, double> evaluate(double tau, double b) const override;
   std::pair<double, double> derivatives(double tau, double b) const override;
 };
 
-/**
- * @brief Create a double-precision fixed point evaluator
- */
 std::shared_ptr<FixedPointEvaluatorDouble>
-createFixedPointEvaluatorDouble(char equation, double K, double r, double q,
-                                double vol,
-                                const std::function<double(double)> &B,
-                                std::shared_ptr<num::Integrate> Integrate);
+createFixedPointEvaluatorDouble(char equation_type, double K_val, double r_val, double q_val, // Renamed params
+                                double vol_val, const std::function<double(double)> &B_func,
+                                std::shared_ptr<num::IntegrateDouble> integrate_instance);
+
+
+// ========================================================================= //
+//                  SINGLE PRECISION AMERICAN OPTIONS                        //
+// ========================================================================= //
 
 /**
  * @class AmericanOptionSingle
- * @brief Base class for single-precision American option pricing models
- *
- * This class provides common functionality for American option pricing
- * using the Anderson-Lake-Offengelden algorithm with single-precision.
  */
 class AmericanOptionSingle {
 public:
-  /**
-   * @brief Constructor
-   */
-  explicit AmericanOptionSingle(
-      std::shared_ptr<num::IntegrateFloat> Integrate);
-
-  /**
-   * @brief Destructor
-   */
+  explicit AmericanOptionSingle(std::shared_ptr<num::IntegrateSingle> integrate_pricing);
   virtual ~AmericanOptionSingle() = default;
 
-  /**
-   * @brief Calculate the early exercise premium
-   */
   virtual float calculateEarlyExercisePremium(
       float S, float K, float r, float q, float vol, float T,
-      const std::shared_ptr<num::ChebyshevInterpolationFloat> &boundary)
-      const = 0;
+      const std::shared_ptr<num::ChebyshevInterpolationSingle> &boundary) const = 0;
 
-  /**
-   * @brief Calculate the early exercise boundary
-   */
-  virtual std::shared_ptr<num::ChebyshevInterpolationFloat>
+  virtual std::shared_ptr<num::ChebyshevInterpolationSingle>
   calculateExerciseBoundary(
       float S, float K, float r, float q, float vol, float T, size_t num_nodes,
       size_t num_iterations,
-      std::shared_ptr<num::IntegrateFloat> fpIntegrate) const = 0;
+      std::shared_ptr<num::IntegrateSingle> integrate_fp) const = 0;
 
-  /**
-   * @brief Calculate the maximum early exercise boundary value
-   */
   virtual float xMax(float K, float r, float q) const = 0;
-
-  /**
-   * @brief Get the Integrate
-   */
-  std::shared_ptr<num::IntegrateFloat> getIntegrate() const {
-    return Integrate_;
-  }
+  std::shared_ptr<num::IntegrateSingle> getPricingIntegrate() const { return integrate_pricing_; }
 
 protected:
-  std::shared_ptr<num::IntegrateFloat> Integrate_;
+  std::shared_ptr<num::IntegrateSingle> integrate_pricing_;
 };
 
 /**
  * @class AmericanPutSingle
- * @brief Single-precision American put option pricing model
- *
- * This class implements American put option pricing using the ALO algorithm
- * with single-precision and optimized numerical methods.
  */
 class AmericanPutSingle : public AmericanOptionSingle {
 public:
-  /**
-   * @brief Constructor
-   */
-  explicit AmericanPutSingle(std::shared_ptr<num::IntegrateFloat> Integrate);
-
-  /**
-   * @brief Calculate the early exercise premium
-   */
+  explicit AmericanPutSingle(std::shared_ptr<num::IntegrateSingle> integrate_pricing);
   float calculateEarlyExercisePremium(
       float S, float K, float r, float q, float vol, float T,
-      const std::shared_ptr<num::ChebyshevInterpolationFloat> &boundary)
-      const override;
-
-  /**
-   * @brief Calculate the early exercise boundary
-   */
-  std::shared_ptr<num::ChebyshevInterpolationFloat> calculateExerciseBoundary(
+      const std::shared_ptr<num::ChebyshevInterpolationSingle> &boundary) const override;
+  std::shared_ptr<num::ChebyshevInterpolationSingle> calculateExerciseBoundary(
       float S, float K, float r, float q, float vol, float T, size_t num_nodes,
       size_t num_iterations,
-      std::shared_ptr<num::IntegrateFloat> fpIntegrate) const override;
-
-  /**
-   * @brief Calculate the maximum early exercise boundary value
-   */
+      std::shared_ptr<num::IntegrateSingle> integrate_fp) const override;
   float xMax(float K, float r, float q) const override;
 
-  /**
-   * @brief Approximate American put price with Barone-Adesi-Whaley method
-   */
-  float approximatePrice(float S, float K, float r, float q, float vol,
-                         float T) const;
-
-  /**
-   * @brief Calculate a batch of American put prices using approximation
-   */
-  std::vector<float> batchApproximatePrice(float S,
-                                           const std::vector<float> &strikes,
-                                           float r, float q, float vol,
-                                           float T) const;
+  // Fast approximation methods specifically for single precision puts
+  float approximatePriceBAW(float S, float K, float r, float q, float vol, float T) const;
+  void batchApproximatePriceBAW(const std::vector<float>& S_vec, const std::vector<float>& K_vec,
+                                const std::vector<float>& r_vec, const std::vector<float>& q_vec,
+                                const std::vector<float>& vol_vec, const std::vector<float>& T_vec,
+                                std::vector<float>& results_vec) const;
 };
 
 /**
  * @class AmericanCallSingle
- * @brief Single-precision American call option pricing model
- *
- * This class implements American call option pricing using the ALO algorithm
- * with single-precision and optimized numerical methods.
  */
 class AmericanCallSingle : public AmericanOptionSingle {
 public:
-  /**
-   * @brief Constructor
-   */
-  explicit AmericanCallSingle(std::shared_ptr<num::IntegrateFloat> Integrate);
-
-  /**
-   * @brief Calculate the early exercise premium
-   */
+  explicit AmericanCallSingle(std::shared_ptr<num::IntegrateSingle> integrate_pricing);
   float calculateEarlyExercisePremium(
       float S, float K, float r, float q, float vol, float T,
-      const std::shared_ptr<num::ChebyshevInterpolationFloat> &boundary)
-      const override;
-
-  /**
-   * @brief Calculate the early exercise boundary
-   */
-  std::shared_ptr<num::ChebyshevInterpolationFloat> calculateExerciseBoundary(
+      const std::shared_ptr<num::ChebyshevInterpolationSingle> &boundary) const override;
+  std::shared_ptr<num::ChebyshevInterpolationSingle> calculateExerciseBoundary(
       float S, float K, float r, float q, float vol, float T, size_t num_nodes,
       size_t num_iterations,
-      std::shared_ptr<num::IntegrateFloat> fpIntegrate) const override;
-
-  /**
-   * @brief Calculate the maximum early exercise boundary value
-   */
+      std::shared_ptr<num::IntegrateSingle> integrate_fp) const override;
   float xMax(float K, float r, float q) const override;
 
-  /**
-   * @brief Approximate American call price with Barone-Adesi-Whaley method
-   */
-  float approximatePrice(float S, float K, float r, float q, float vol,
-                         float T) const;
-
-  /**
-   * @brief Calculate a batch of American call prices using approximation
-   */
-  std::vector<float> batchApproximatePrice(float S,
-                                           const std::vector<float> &strikes,
-                                           float r, float q, float vol,
-                                           float T) const;
+  float approximatePriceBAW(float S, float K, float r, float q, float vol, float T) const;
+   void batchApproximatePriceBAW(const std::vector<float>& S_vec, const std::vector<float>& K_vec,
+                                const std::vector<float>& r_vec, const std::vector<float>& q_vec,
+                                const std::vector<float>& vol_vec, const std::vector<float>& T_vec,
+                                std::vector<float>& results_vec) const;
 };
 
 /**
  * @class FixedPointEvaluatorSingle
- * @brief Base class for single-precision fixed point equation evaluators
- *
- * This class defines the interface for fixed point equation evaluators
- * used in the ALO algorithm to compute early exercise boundaries with
- * single-precision.
  */
 class FixedPointEvaluatorSingle {
 public:
-  /**
-   * @brief Constructor
-   */
-  FixedPointEvaluatorSingle(float K, float r, float q, float vol,
-                            const std::function<float(float)> &B,
-                            std::shared_ptr<num::IntegrateFloat> Integrate);
-
-  /**
-   * @brief Destructor
-   */
+  FixedPointEvaluatorSingle(float K_val, float r_val, float q_val, float vol_val,
+                            const std::function<float(float)> &B_func,
+                            std::shared_ptr<num::IntegrateSingle> integrate_instance);
   virtual ~FixedPointEvaluatorSingle() = default;
-
-  /**
-   * @brief Evaluate the fixed point equation
-   */
-  virtual std::tuple<float, float, float> evaluate(float tau,
-                                                   float b) const = 0;
-
-  /**
-   * @brief Calculate derivatives of the fixed point equation
-   */
+  virtual std::tuple<float, float, float> evaluate(float tau, float b) const = 0;
   virtual std::pair<float, float> derivatives(float tau, float b) const = 0;
 
 protected:
-  /**
-   * @brief Calculate d1 and d2 terms for Black-Scholes
-   */
-  std::pair<float, float> d(float t, float z) const;
+  std::pair<float, float> d_black_scholes(float t, float spot_ratio_K) const; // Renamed
+  float normalCDF(float x) const; // Uses num::fast_normal_cdf
+  float normalPDF(float x) const; // Uses num::fast_normal_pdf
 
-  /**
-   * @brief Calculate normal CDF using fast approximation
-   */
-  float normalCDF(float x) const;
-
-  /**
-   * @brief Calculate normal PDF using fast approximation
-   */
-  float normalPDF(float x) const;
-
-  // Member variables
-  float K_;
-  float r_;
-  float q_;
-  float vol_;
-  float vol2_; // vol^2, precomputed
-  std::function<float(float)> B_;
-  std::shared_ptr<num::IntegrateFloat> Integrate_;
+  float K_value_;
+  float r_rate_;
+  float q_yield_;
+  float volatility_;
+  float vol_sq_; 
+  std::function<float(float)> B_boundary_func_;
+  std::shared_ptr<num::IntegrateSingle> integrate_fp_;
 };
 
 /**
  * @class EquationASingle
- * @brief Single-precision implementation of Equation A from the ALO paper
  */
 class EquationASingle : public FixedPointEvaluatorSingle {
 public:
-  /**
-   * @brief Constructor
-   */
-  EquationASingle(float K, float r, float q, float vol,
-                  const std::function<float(float)> &B,
-                  std::shared_ptr<num::IntegrateFloat> Integrate);
-
-  /**
-   * @brief Evaluate the fixed point equation
-   */
+  EquationASingle(float K_val, float r_val, float q_val, float vol_val,
+                  const std::function<float(float)> &B_func,
+                  std::shared_ptr<num::IntegrateSingle> integrate_instance);
   std::tuple<float, float, float> evaluate(float tau, float b) const override;
-
-  /**
-   * @brief Calculate derivatives of the fixed point equation
-   */
   std::pair<float, float> derivatives(float tau, float b) const override;
 };
 
 /**
  * @class EquationBSingle
- * @brief Single-precision implementation of Equation B from the ALO paper
  */
 class EquationBSingle : public FixedPointEvaluatorSingle {
 public:
-  /**
-   * @brief Constructor
-   */
-  EquationBSingle(float K, float r, float q, float vol,
-                  const std::function<float(float)> &B,
-                  std::shared_ptr<num::IntegrateFloat> Integrate);
-
-  /**
-   * @brief Evaluate the fixed point equation
-   */
+  EquationBSingle(float K_val, float r_val, float q_val, float vol_val,
+                  const std::function<float(float)> &B_func,
+                  std::shared_ptr<num::IntegrateSingle> integrate_instance);
   std::tuple<float, float, float> evaluate(float tau, float b) const override;
-
-  /**
-   * @brief Calculate derivatives of the fixed point equation
-   */
   std::pair<float, float> derivatives(float tau, float b) const override;
 };
 
-/**
- * @brief Create a single-precision fixed point evaluator
- */
 std::shared_ptr<FixedPointEvaluatorSingle> createFixedPointEvaluatorSingle(
-    char equation, float K, float r, float q, float vol,
-    const std::function<float(float)> &B,
-    std::shared_ptr<num::IntegrateFloat> Integrate);
+    char equation_type, float K_val, float r_val, float q_val, float vol_val,
+    const std::function<float(float)> &B_func,
+    std::shared_ptr<num::IntegrateSingle> integrate_instance);
 
 } // namespace mod
 } // namespace alo

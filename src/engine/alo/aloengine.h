@@ -2,559 +2,154 @@
 #define ENGINE_ALO_ALOENGINE_H
 
 #include "aloscheme.h"
-#include <immintrin.h>
-#include <sleef.h> 
+#include "num/integrate.h" 
+#include "num/chebyshev.h" 
+#include "opt/cache.h"     
+
+#include <immintrin.h> 
+#include <sleef.h>     
 #include <memory>
 #include <functional>
 #include <string>
 #include <vector>
-#include <unordered_map>
+#include <unordered_map> 
 #include <array>
 #include <tuple>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <atomic>
-#include <deque>
-#include <chrono>
+#include <chrono> 
 
-// Forward declarations
 namespace engine {
 namespace alo {
-namespace num {
-    class Integrate;
-    class ChebyshevInterpolation;
-}
 
-/**
- * @enum FixedPointEquation
- * @brief Different fixed point equations from the ALO paper
- */
 enum FixedPointEquation {
-    FP_A,  ///< Equation A from the paper
-    FP_B,  ///< Equation B from the paper
-    AUTO   ///< Automatically choose based on |r-q|
+    FP_A, 
+    FP_B,  
+    AUTO   
 };
 
-/**
- * @enum OptionType
- * @brief Type of option to price
- */
 enum OptionType {
-    PUT,  ///< Put option
-    CALL  ///< Call option
+    PUT, 
+    CALL  
 };
 
-/**
- * @class ALOIterationScheme
- * @brief Class to represent the iteration scheme parameters for the ALO algorithm
- */
-class ALOIterationScheme {
+class ALOIterationScheme { // This scheme primarily drives the double-precision engine
 public:
-    /**
-     * @brief Constructor
-     * 
-     * @param n Number of Chebyshev nodes
-     * @param m Number of fixed point iterations
-     * @param fpIntegrate Integrate for fixed point equation
-     * @param pricingIntegrate Integrate for pricing
-     */
-    ALOIterationScheme(size_t n, size_t m, 
-                       std::shared_ptr<num::Integrate> fpIntegrate,
-                       std::shared_ptr<num::Integrate> pricingIntegrate);
+    ALOIterationScheme(size_t n_nodes, size_t m_iterations,
+                       std::shared_ptr<num::IntegrateDouble> fp_integrate, 
+                       std::shared_ptr<num::IntegrateDouble> pricing_integrate); 
     
-    // Getters
-    size_t getNumChebyshevNodes() const { return n_; }
-    size_t getNumFixedPointIterations() const { return m_; }
-    std::shared_ptr<num::Integrate> getFixedPointIntegrate() const { return fpIntegrate_; }
-    std::shared_ptr<num::Integrate> getPricingIntegrate() const { return pricingIntegrate_; }
-    
-    /**
-     * @brief Get a string description of the scheme
-     * @return String description
-     */
+    size_t getNumChebyshevNodes() const { return n_nodes_; }
+    size_t getNumFixedPointIterations() const { return m_iterations_; }
+    std::shared_ptr<num::IntegrateDouble> getFixedPointIntegrate() const { return fp_integrate_; }
+    std::shared_ptr<num::IntegrateDouble> getPricingIntegrate() const { return pricing_integrate_; }
     std::string getDescription() const;
     
 private:
-    size_t n_; ///< Number of Chebyshev nodes
-    size_t m_; ///< Total number of fixed point iterations
-    std::shared_ptr<num::Integrate> fpIntegrate_; ///< Integrate for fixed point equation
-    std::shared_ptr<num::Integrate> pricingIntegrate_; ///< Integrate for pricing
+    size_t n_nodes_; 
+    size_t m_iterations_; 
+    std::shared_ptr<num::IntegrateDouble> fp_integrate_; 
+    std::shared_ptr<num::IntegrateDouble> pricing_integrate_;
 };
 
-/**
- * @class ALOEngine
- * @brief Main ALO engine class for pricing American options
- * 
- * This class implements the Andersen-Lake-Offengelden algorithm for
- * pricing American options with high accuracy and performance.
- * The implementation follows deterministic execution principles
- * for reliable operation in trading systems.
- */
 class ALOEngine {
 public:
-    /**
-     * @brief Constructor
-     * 
-     * @param scheme Numerical scheme to use
-     * @param eq Fixed point equation to use
-     */
-    explicit ALOEngine(ALOScheme scheme = ACCURATE, FixedPointEquation eq = AUTO);
-    
-    /**
-     * @brief Destructor
-     */
+    explicit ALOEngine(ALOScheme scheme_type = ACCURATE, FixedPointEquation eq = AUTO);
     ~ALOEngine() = default;
     
-    /**
-     * @brief Main pricing function for American options
-     * 
-     * @param S Current spot price
-     * @param K Strike price
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @param type Option type (PUT or CALL)
-     * @return Option price
-     */
+    // Double precision
     double calculateOption(double S, double K, double r, double q, double vol, double T, OptionType type = PUT) const;
-    
-    /**
-     * @brief Legacy method for American put pricing (for backwards compatibility)
-     * 
-     * @param S Current spot price
-     * @param K Strike price
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @return Put option price
-     */
-    double calculatePut(double S, double K, double r, double q, double vol, double T) const;
-    
-    /**
-     * @brief European Black-Scholes put pricing
-     * 
-     * @param S Current spot price
-     * @param K Strike price
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @return European put option price
-     */
-    static double blackScholesPut(double S, double K, double r, double q, double vol, double T);
-    
-    /**
-     * @brief European Black-Scholes call pricing
-     * 
-     * @param S Current spot price
-     * @param K Strike price
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @return European call option price
-     */
-    static double blackScholesCall(double S, double K, double r, double q, double vol, double T);
-    
-    /**
-     * @brief Create a fast scheme
-     * @return ALOIterationScheme pointer
-     */
-    static std::shared_ptr<ALOIterationScheme> createFastScheme();
-    
-    /**
-     * @brief Create an accurate scheme
-     * @return ALOIterationScheme pointer
-     */
-    static std::shared_ptr<ALOIterationScheme> createAccurateScheme();
-    
-    /**
-     * @brief Create a high precision scheme
-     * @return ALOIterationScheme pointer
-     */
-    static std::shared_ptr<ALOIterationScheme> createHighPrecisionScheme();
-    
-    /**
-     * @brief Set the numerical scheme
-     * @param scheme Scheme to use
-     */
-    void setScheme(ALOScheme scheme);
-    
-    /**
-     * @brief Set the fixed point equation
-     * @param eq Equation to use
-     */
-    void setFixedPointEquation(FixedPointEquation eq);
-    
-    /**
-     * @brief Get the current scheme description
-     * @return String description of the current scheme
-     */
-    std::string getSchemeDescription() const;
-    
-    /**
-     * @brief Get the name of the current fixed point equation
-     * @return String name of the current equation
-     */
-    std::string getEquationName() const;
-    
-    /**
-     * @brief Clear the pricing cache
-     */
-    void clearCache() const;
-    
-    /**
-     * @brief Get the size of the cache
-     * @return Number of cached prices
-     */
-    size_t getCacheSize() const;
-    
-    /**
-     * @brief Calculate the early exercise premium
-     * 
-     * @param S Current spot price
-     * @param K Strike price
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @param type Option type (PUT or CALL)
-     * @return Early exercise premium
-     */
+    double calculatePut(double S, double K, double r, double q, double vol, double T) const; 
     double calculateEarlyExercisePremium(double S, double K, double r, double q, double vol, double T, 
                                         OptionType type = PUT) const;
     
-    /**
-     * @brief Batch pricing for multiple put options with the same parameters except strikes
-     * 
-     * @param S Current spot price
-     * @param strikes Vector of strike prices
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @return Vector of put option prices
-     */
+    static double blackScholesPut(double S, double K, double r, double q, double vol, double T);
+    static double blackScholesCall(double S, double K, double r, double q, double vol, double T);
+    
+    static std::shared_ptr<ALOIterationScheme> createFastScheme();
+    static std::shared_ptr<ALOIterationScheme> createAccurateScheme();
+    static std::shared_ptr<ALOIterationScheme> createHighPrecisionScheme();
+    
+    void setScheme(ALOScheme scheme_type); 
+    void setFixedPointEquation(FixedPointEquation eq);
+    
+    std::string getSchemeDescription() const;
+    std::string getEquationName() const;
+    
+    void clearCache() const; 
+    size_t getCacheSize() const; 
+    
+    // Batch double precision
     std::vector<double> batchCalculatePut(double S, const std::vector<double>& strikes,
                                          double r, double q, double vol, double T) const;
-
-    /**
-     * @brief Batch pricing for multiple put options with the same spot but varying parameters
-     * 
-     * @param S Current spot price
-     * @param options Vector of option parameters (strike, r, q, vol, T)
-     * @return Vector of put option prices
-     */
     std::vector<double> batchCalculatePut(double S, 
                                          const std::vector<std::tuple<double, double, double, double, double>>& options) const;
-
-    /**
-     * @brief SIMD-accelerated pricing for 4 put options at once with AVX2
-     * 
-     * @param spots Array of 4 spot prices
-     * @param strikes Array of 4 strike prices
-     * @param rs Array of 4 risk-free rates
-     * @param qs Array of 4 dividend yields
-     * @param vols Array of 4 volatilities
-     * @param Ts Array of 4 times to maturity
-     * @return Array of 4 put option prices
-     */
-    std::array<double, 4> calculatePut4(
-        const std::array<double, 4>& spots,
-        const std::array<double, 4>& strikes,
-        const std::array<double, 4>& rs,
-        const std::array<double, 4>& qs,
-        const std::array<double, 4>& vols,
-        const std::array<double, 4>& Ts) const;
-
-    /**
-     * @brief SIMD-accelerated pricing for 4 put options with same parameters except strikes
-     * 
-     * @param S Spot price
-     * @param strikes Array of 4 strike prices
-     * @param r Risk-free rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity
-     * @return Array of 4 put option prices
-     */
-    std::array<double, 4> calculatePut4(
-        double S,
-        const std::array<double, 4>& strikes,
-        double r, double q, double vol, double T) const;
-
-    /**
-     * @brief Batch pricing for multiple call options with the same parameters except strikes
-     * 
-     * @param S Current spot price
-     * @param strikes Vector of strike prices
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @return Vector of call option prices
-     */
     std::vector<double> batchCalculateCall(double S, const std::vector<double>& strikes,
                                           double r, double q, double vol, double T) const;
-    
-    /**
-     * @brief Parallel batch pricing for large numbers of put options
-     * 
-     * @param S Current spot price
-     * @param strikes Vector of strike prices
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @return Vector of put option prices
-     */
-    std::vector<double> parallelBatchCalculatePut(double S, const std::vector<double>& strikes,
-                                                 double r, double q, double vol, double T) const;
 
-    /**
-     * @brief Process a chunk of put options with SIMD acceleration
-     * 
-     * @param S Spot price (constant)
-     * @param strikes Array of strike prices
-     * @param r Risk-free rate (constant)
-     * @param q Dividend yield (constant)
-     * @param vol Volatility (constant)
-     * @param T Time to maturity (constant)
-     * @param results Output array for results
-     * @param size Number of options to process
-     */
-    void processSIMDChunk(double S, const double* strikes, double r, double q, 
-                        double vol, double T, double* results, size_t size) const;
+    // SIMD double precision (AVX2, 4 doubles)
+    std::array<double, 4> calculatePut4(
+        const std::array<double, 4>& spots, const std::array<double, 4>& strikes,
+        const std::array<double, 4>& rs, const std::array<double, 4>& qs,
+        const std::array<double, 4>& vols, const std::array<double, 4>& Ts) const;
+    std::array<double, 4> calculatePut4(
+        double S, const std::array<double, 4>& strikes,
+        double r, double q, double vol, double T) const;
+
+    // --- Single precision calculations ---
+    // European (takes double inputs for API consistency, returns float)
+    float calculateEuropeanSingle(double S_dbl, double K_dbl, double r_dbl, double q_dbl, 
+                               double vol_dbl, double T_dbl, int optionType) const; 
+    // American - Full ALO (takes double inputs for API consistency, returns float)
+    float calculateAmericanSingle(double S_dbl, double K_dbl, double r_dbl, double q_dbl, 
+                               double vol_dbl, double T_dbl, int optionType) const; 
     
-    /**
-     * @brief Process options using single-precision for better SIMD performance
-     * 
-     * @param S Current spot price
-     * @param strikes Vector of strike prices
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @return Vector of put option prices in single precision
-     */
-    std::vector<float> batchCalculatePutSingle(
+    // Batch single precision - Full ALO
+    std::vector<float> batchCalculatePutSingle( // Full ALO for puts
         float S, const std::vector<float>& strikes,
         float r, float q, float vol, float T) const;
-
-    /**
-     * @brief Process call options using single-precision for better SIMD performance
-     * 
-     * @param S Current spot price
-     * @param strikes Vector of strike prices
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @return Vector of call option prices in single precision
-     */
-    std::vector<float> batchCalculateCallSingle(
+    std::vector<float> batchCalculateCallSingle( // Full ALO for calls
         float S, const std::vector<float>& strikes,
         float r, float q, float vol, float T) const;
+    
+    // This might be intended for BAW or other approx, kept for compatibility from original.
+    // If it's meant to be full ALO, it's redundant with batchCalculatePutSingle.
+    std::vector<float> batchCalculatePutFloat( 
+            float S, const std::vector<float>& strikes,
+            float r, float q, float vol, float T) const;
 
-    /**
-     * @brief Single-precision European option pricing
-     * 
-     * @param S Current spot price
-     * @param K Strike price
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @param optionType Option type (0=PUT, 1=CALL)
-     * @return Option price in single precision
-     */
-    float calculateEuropeanSingle(double S, double K, double r, double q, 
-                               double vol, double T, int optionType) const;
 
-    /**
-     * @brief Single-precision American option pricing
-     * 
-     * @param S Current spot price
-     * @param K Strike price
-     * @param r Risk-free interest rate
-     * @param q Dividend yield
-     * @param vol Volatility
-     * @param T Time to maturity in years
-     * @param optionType Option type (0=PUT, 1=CALL)
-     * @return Option price in single precision
-     */
-    float calculateAmericanSingle(double S, double K, double r, double q, 
-                               double vol, double T, int optionType) const;
-                        
-    /**
-     * @brief Run benchmark comparing scalar and SIMD implementations
-     * 
-     * @param numOptions Number of options to price in the benchmark (default: 10 million)
-     */
     void runBenchmark(int numOptions = 10000000);
                         
-    #ifdef __AVX512F__
-    /**
-     * @brief Process a chunk of options using AVX-512 SIMD
-     */
-    void processAVX512Chunk(double S, const double* strikes, double r, double q,
-                          double vol, double T, double* results, size_t size) const;
-    #endif
-    
 private:
-    /**
-     * @brief Implementation of American put option pricing
-     */
+    // Double precision internal implementations
     double calculatePutImpl(double S, double K, double r, double q, double vol, double T) const;
-    
-    /**
-     * @brief Implementation of American call option pricing
-     */
     double calculateCallImpl(double S, double K, double r, double q, double vol, double T) const;
     
-    /**
-     * @brief Helper method for processing a chunk of American put options
-     */
-    void processAmericanPutChunk(const double* S, const double* K, const double* r,
-                               const double* q, const double* vol, const double* T,
-                               double* results, size_t n) const;
-    
-    /**
-     * @brief Calculate the early exercise boundary for puts
-     */
-    std::shared_ptr<num::ChebyshevInterpolation> calculatePutExerciseBoundary(
-        double S, double K, double r, double q, double vol, double T) const;
-    
-    /**
-     * @brief Calculate the early exercise boundary for calls
-     */
-    std::shared_ptr<num::ChebyshevInterpolation> calculateCallExerciseBoundary(
-        double S, double K, double r, double q, double vol, double T) const;
-    
-    /**
-     * @brief Calculate the maximum early exercise boundary value for puts
-     */
-    double xMaxPut(double K, double r, double q) const;
-    
-    /**
-     * @brief Calculate the maximum early exercise boundary value for calls
-     */
-    double xMaxCall(double K, double r, double q) const;
-    
-    /**
-     * @brief Calculate the early exercise premium for puts
-     */
-    double calculatePutExercisePremium(
-        double S, double K, double r, double q, double vol, double T,
-        const std::shared_ptr<num::ChebyshevInterpolation>& boundary) const;
-    
-    /**
-     * @brief Calculate the early exercise premium for calls
-     */
-    double calculateCallExercisePremium(
-        double S, double K, double r, double q, double vol, double T,
-        const std::shared_ptr<num::ChebyshevInterpolation>& boundary) const;
-    
-    /**
-     * @brief Helper to calculate put early exercise premium for SIMD chunks
-     */
-    __m256d calculatePutPremium4(__m256d S, __m256d K, __m256d r, __m256d q, 
-                              __m256d vol, __m256d T) const;
-    
-    /**
-     * @brief Parallel batch pricing for large numbers of put options
-     * using single-precision calculations
-     */
-    std::vector<float> parallelBatchCalculatePutSingle(
-        float S, const std::vector<float>& strikes,
-        float r, float q, float vol, float T) const;
-    
-    /**
-     * @class FixedPointEvaluator
-     * @brief Base class for fixed point equation evaluators
-     */
-    class FixedPointEvaluator {
-    public:
-        FixedPointEvaluator(double K, double r, double q, double vol, 
-                          const std::function<double(double)>& B,
-                          std::shared_ptr<num::Integrate> Integrate);
-        
-        virtual ~FixedPointEvaluator() = default;
-        
-        // Main evaluation functions
-        virtual std::tuple<double, double, double> evaluate(double tau, double b) const = 0;
-        virtual std::pair<double, double> derivatives(double tau, double b) const = 0;
-        
-    protected:
-        // Helper functions
-        std::pair<double, double> d(double t, double z) const;
-        
-        double K_;
-        double r_;
-        double q_;
-        double vol_;
-        double vol2_; // vol^2, precomputed
-        std::function<double(double)> B_;
-        std::shared_ptr<num::Integrate> Integrate_;
-        
-        // Normal distribution functions
-        double normalCDF(double x) const;
-        double normalPDF(double x) const;
-    };
-    
-    /**
-     * @class EquationA
-     * @brief Implementation of Equation A from the ALO paper
-     */
-    class EquationA : public FixedPointEvaluator {
-    public:
-        EquationA(double K, double r, double q, double vol, 
-                 const std::function<double(double)>& B,
-                 std::shared_ptr<num::Integrate> Integrate);
-        
-        std::tuple<double, double, double> evaluate(double tau, double b) const override;
-        std::pair<double, double> derivatives(double tau, double b) const override;
-    };
-    
-    /**
-     * @class EquationB
-     * @brief Implementation of Equation B from the ALO paper
-     */
-    class EquationB : public FixedPointEvaluator {
-    public:
-        EquationB(double K, double r, double q, double vol, 
-                 const std::function<double(double)>& B,
-                 std::shared_ptr<num::Integrate> Integrate);
-        
-        std::tuple<double, double, double> evaluate(double tau, double b) const override;
-        std::pair<double, double> derivatives(double tau, double b) const override;
-    };
-    
-    /**
-     * @brief Create a fixed point evaluator based on the equation type
-     */
-    std::shared_ptr<FixedPointEvaluator> createFixedPointEvaluator(
+    // Forward declare inner classes for fixed point evaluation (double precision)
+    class FixedPointEvaluatorDouble; 
+    class EquationADouble;          
+    class EquationBDouble;          
+
+    std::shared_ptr<FixedPointEvaluatorDouble> createFixedPointEvaluatorDouble( 
         double K, double r, double q, double vol, 
-        const std::function<double(double)>& B) const;
+        const std::function<double(double)>& B_boundary_func) const; 
+
+    // Single precision internal implementations
+    float calculatePutImplSingle(float S, float K, float r, float q, float vol, float T) const;
+    float calculateCallImplSingle(float S, float K, float r, float q, float vol, float T) const;
+
+    // Forward declare inner classes for fixed point evaluation (single precision)
+    class FixedPointEvaluatorSingle; 
+    class EquationASingle;          
+    class EquationBSingle;    
+
+    std::shared_ptr<FixedPointEvaluatorSingle> createFixedPointEvaluatorSingle( 
+        float K, float r, float q, float vol, 
+        const std::function<float(float)>& B_boundary_func) const;
     
     // Member variables
-    std::shared_ptr<ALOIterationScheme> scheme_;
-    FixedPointEquation equation_;
-    
-    // Legacy cache for backward compatibility
-    mutable std::unordered_map<std::string, double> legacy_cache_;
+    std::shared_ptr<ALOIterationScheme> scheme_ptr_; 
+    FixedPointEquation equation_choice_; 
 };
-
-// Forward declaration for distributed task dispatcher
-namespace dist {
-    class TaskDispatcher;
-    
-    // Factory function to create task dispatchers - match signature exactly with alodistribute.h
-    std::shared_ptr<TaskDispatcher> createTaskDispatcher(ALOScheme scheme, size_t chunkSize);
-}
 
 } // namespace alo
 } // namespace engine

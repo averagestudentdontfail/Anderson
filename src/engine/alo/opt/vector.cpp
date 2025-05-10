@@ -1,22 +1,33 @@
 #include "vector.h"
-#include "simd.h"
+#include "simd.h" 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
-#include <cstring>
-#include <immintrin.h>
-#include <sleef.h>
-#include <vector>
+#include <cstdint> 
+#include <cstring> 
+#include <limits> 
 
-// Platform-specific CPU detection
+// Ensure M_SQRT2 and M_PI are defined
+#ifndef M_SQRT2
+#define M_SQRT2 1.41421356237309504880 // sqrt(2)
+#endif
+#ifndef M_PI
+#define M_PI 3.14159265358979323846 // pi
+#endif
+
+const double INV_SQRT_2PI = 0.39894228040143267794;
+const float INV_SQRT_2PI_F = 0.3989422804f;
+
 #ifdef _WIN32
 #include <intrin.h>
-inline void get_cpuid(int level, int output[4]) { __cpuid(output, level); }
+inline void get_cpuidex(int output[4], int level, int sublevel) { __cpuidex(output, level, sublevel); }
+inline void get_cpuid(int output[4], int level) { __cpuid(output, level); } 
 #else
 #include <cpuid.h>
-inline void get_cpuid(int level, int output[4]) {
-  unsigned int *regs = reinterpret_cast<unsigned int *>(output);
-  __get_cpuid(level, &regs[0], &regs[1], &regs[2], &regs[3]);
+inline void get_cpuidex(int output[4], int level, int sublevel) {
+  __cpuid_count(level, sublevel, output[0], output[1], output[2], output[3]);
+}
+inline void get_cpuid(int output[4], int level) { 
+  __get_cpuid(level, (unsigned int*)&output[0], (unsigned int*)&output[1], (unsigned int*)&output[2], (unsigned int*)&output[3]);
 }
 #endif
 
@@ -25,27 +36,22 @@ namespace alo {
 namespace opt {
 
 SIMDSupport detectSIMDSupport() {
-  int info[4];
+    int info[4];
+    get_cpuid(info, 0x00000001);
 
-  // Check for SSE2
-  get_cpuid(1, info);
-  if (!(info[3] & (1 << 26)))
+    bool sse2 = (info[3] & (1 << 26)) != 0;
+    bool avx  = (info[2] & (1 << 28)) != 0;
+
+    bool avx2 = false;
+    if (avx) { 
+        get_cpuidex(info, 0x00000007, 0);
+        avx2 = (info[1] & (1 << 5)) != 0;
+    }
+
+    if (avx2) return AVX2;
+    if (avx) return AVX; 
+    if (sse2) return SSE2;
     return NONE;
-
-  // Check for AVX
-  if (!(info[2] & (1 << 28)))
-    return SSE2;
-
-  // Check for AVX2
-  get_cpuid(7, info);
-  if (!(info[1] & (1 << 5)))
-    return AVX;
-
-  // Check for AVX512F
-  if (!(info[1] & (1 << 16)))
-    return AVX2;
-
-  return AVX512;
 }
 
 // Data conversion utilities
@@ -67,940 +73,502 @@ VectorSingle::convertToDouble(const std::vector<float> &input) {
   return result;
 }
 
-inline bool shouldUseSimd(size_t size) {
-  return size >= 32; // Only use SIMD for operations with size >= 32
+// --- Scalar Black-Scholes Helper Functions ---
+namespace { 
+    // Double precision scalar Black-Scholes
+    double scalar_bs_d1(double S, double K, double r, double q, double vol, double T) {
+        return (std::log(S / K) + (r - q + 0.5 * vol * vol) * T) / (vol * std::sqrt(T));
+    }
+    double scalar_bs_nd(double x) { // N(x)
+        return 0.5 * (1.0 + std::erf(x / M_SQRT2));
+    }
+    double scalar_bs_pdf(double x) { // n(x)
+        return INV_SQRT_2PI * std::exp(-0.5 * x * x);
+    }
+
+    // Single precision scalar Black-Scholes (using num::fast_*)
+    float scalar_bs_d1_f(float S, float K, float r, float q, float vol, float T) {
+        return (std::log(S / K) + (r - q + 0.5f * vol * vol) * T) / (vol * std::sqrt(T));
+    }
+    // For N(x) and n(x) in single precision, we use the num::fast_normal_cdf and num::fast_normal_pdf from float.h
 }
 
-void VectorDouble::EuropeanPut(const double *S, const double *K,
-                               const double *r, const double *q,
-                               const double *vol, const double *T,
-                               double *result, size_t size) {
-  // Process in steps of 4 (AVX2 double precision)
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    // Load vectors
-    __m256d S_vec = SimdOperationDouble::load(S + i);
-    __m256d K_vec = SimdOperationDouble::load(K + i);
-    __m256d r_vec = SimdOperationDouble::load(r + i);
-    __m256d q_vec = SimdOperationDouble::load(q + i);
-    __m256d vol_vec = SimdOperationDouble::load(vol + i);
-    __m256d T_vec = SimdOperationDouble::load(T + i);
 
-    // Calculate option prices
+// --- VectorDouble Implementations ---
+void VectorDouble::EuropeanPut(const double *S_arr, const double *K_arr,
+                               const double *r_arr, const double *q_arr,
+                               const double *vol_arr, const double *T_arr,
+                               double *result_arr, size_t size) {
+  size_t i = 0;
+  const size_t avx2_step = 4; 
+
+  for (; i + (avx2_step - 1) < size; i += avx2_step) {
+    __m256d S_vec = SimdOperationDouble::load(S_arr + i);
+    __m256d K_vec = SimdOperationDouble::load(K_arr + i);
+    __m256d r_vec = SimdOperationDouble::load(r_arr + i);
+    __m256d q_vec = SimdOperationDouble::load(q_arr + i);
+    __m256d vol_vec = SimdOperationDouble::load(vol_arr + i);
+    __m256d T_vec = SimdOperationDouble::load(T_arr + i);
+
     __m256d prices = SimdOperationDouble::EuropeanPut(S_vec, K_vec, r_vec,
                                                       q_vec, vol_vec, T_vec);
-
-    // Store results
-    SimdOperationDouble::store(result + i, prices);
+    SimdOperationDouble::store(result_arr + i, prices);
   }
 
-  // Handle remaining elements
   for (; i < size; ++i) {
-    // Use scalar calculation
-    double d1 =
-        (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) /
-        (vol[i] * std::sqrt(T[i]));
-    double d2 = d1 - vol[i] * std::sqrt(T[i]);
-
-    double Nd1 = 0.5 * (1.0 + std::erf(-d1 / std::sqrt(2.0)));
-    double Nd2 = 0.5 * (1.0 + std::erf(-d2 / std::sqrt(2.0)));
-
-    result[i] = K[i] * std::exp(-r[i] * T[i]) * Nd2 -
-                S[i] * std::exp(-q[i] * T[i]) * Nd1;
+    if (vol_arr[i] <= 1e-12 || T_arr[i] <= 1e-12) {
+        result_arr[i] = std::max(0.0, K_arr[i] - S_arr[i]);
+        continue;
+    }
+    double d1 = scalar_bs_d1(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
+    double d2 = d1 - vol_arr[i] * std::sqrt(T_arr[i]);
+    result_arr[i] = K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * scalar_bs_nd(-d2) -
+                    S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_nd(-d1);
   }
 }
 
-void VectorDouble::EuropeanCall(const double *S, const double *K,
-                                const double *r, const double *q,
-                                const double *vol, const double *T,
-                                double *result, size_t size) {
-  // Process in steps of 4 (AVX2 double precision)
+void VectorDouble::EuropeanCall(const double *S_arr, const double *K_arr,
+                                const double *r_arr, const double *q_arr,
+                                const double *vol_arr, const double *T_arr,
+                                double *result_arr, size_t size) {
   size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    // Load vectors
-    __m256d S_vec = SimdOperationDouble::load(S + i);
-    __m256d K_vec = SimdOperationDouble::load(K + i);
-    __m256d r_vec = SimdOperationDouble::load(r + i);
-    __m256d q_vec = SimdOperationDouble::load(q + i);
-    __m256d vol_vec = SimdOperationDouble::load(vol + i);
-    __m256d T_vec = SimdOperationDouble::load(T + i);
+  const size_t avx2_step = 4; 
 
-    // Calculate option prices
+  for (; i + (avx2_step - 1) < size; i += avx2_step) {
+    __m256d S_vec = SimdOperationDouble::load(S_arr + i);
+    __m256d K_vec = SimdOperationDouble::load(K_arr + i);
+    __m256d r_vec = SimdOperationDouble::load(r_arr + i);
+    __m256d q_vec = SimdOperationDouble::load(q_arr + i);
+    __m256d vol_vec = SimdOperationDouble::load(vol_arr + i);
+    __m256d T_vec = SimdOperationDouble::load(T_arr + i);
+
     __m256d prices = SimdOperationDouble::EuropeanCall(S_vec, K_vec, r_vec,
                                                        q_vec, vol_vec, T_vec);
-
-    // Store results
-    SimdOperationDouble::store(result + i, prices);
+    SimdOperationDouble::store(result_arr + i, prices);
   }
 
-  // Handle remaining elements
   for (; i < size; ++i) {
-    // Use scalar calculation
-    double d1 =
-        (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) /
-        (vol[i] * std::sqrt(T[i]));
-    double d2 = d1 - vol[i] * std::sqrt(T[i]);
-
-    double Nd1 = 0.5 * (1.0 + std::erf(d1 / std::sqrt(2.0)));
-    double Nd2 = 0.5 * (1.0 + std::erf(d2 / std::sqrt(2.0)));
-
-    result[i] = S[i] * std::exp(-q[i] * T[i]) * Nd1 -
-                K[i] * std::exp(-r[i] * T[i]) * Nd2;
-  }
-}
-
-void VectorDouble::EuropeanPutGreek(const double *S, const double *K,
-                                    const double *r, const double *q,
-                                    const double *vol, const double *T,
-                                    GreekDouble *results, size_t size) {
-  for (size_t i = 0; i < size; ++i) {
-    // Handle degenerate cases
-    if (vol[i] <= 0.0 || T[i] <= 0.0) {
-      results[i].price = std::max(0.0, K[i] - S[i]);
-      results[i].delta = (S[i] < K[i]) ? -1.0 : 0.0;
-      results[i].gamma = 0.0;
-      results[i].vega = 0.0;
-      results[i].theta = 0.0;
-      results[i].rho = 0.0;
-      continue;
-    }
-
-    // Calculate d1 and d2
-    double sqrt_T = std::sqrt(T[i]);
-    double d1 =
-        (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) /
-        (vol[i] * sqrt_T);
-    double d2 = d1 - vol[i] * sqrt_T;
-
-    // Calculate discount factors
-    double dr = std::exp(-r[i] * T[i]);
-    double dq = std::exp(-q[i] * T[i]);
-
-    // Calculate N(-d1) and N(-d2)
-    double Nd1 = 0.5 * (1.0 + std::erf(-d1 / std::sqrt(2.0)));
-    double Nd2 = 0.5 * (1.0 + std::erf(-d2 / std::sqrt(2.0)));
-
-    // Calculate option price
-    results[i].price = K[i] * dr * Nd2 - S[i] * dq * Nd1;
-
-    // Calculate PDF for Greeks
-    double pdf_d1 = std::exp(-0.5 * d1 * d1) / std::sqrt(2.0 * M_PI);
-
-    // Delta = -e^(-q*T) * N(-d1)
-    results[i].delta = -dq * Nd1;
-
-    // Gamma = e^(-q*T) * PDF(d1) / (S * vol * sqrt(T))
-    results[i].gamma = dq * pdf_d1 / (S[i] * vol[i] * sqrt_T);
-
-    // Vega = S * e^(-q*T) * PDF(d1) * sqrt(T) / 100
-    results[i].vega = 0.01 * S[i] * dq * pdf_d1 * sqrt_T;
-
-    // Theta calculation (daily)
-    double term1 = -S[i] * dq * pdf_d1 * vol[i] / (2.0 * sqrt_T);
-    double term2 = q[i] * S[i] * dq * Nd1;
-    double term3 = -r[i] * K[i] * dr * Nd2;
-    results[i].theta = (term1 + term2 + term3) / 365.0;
-
-    // Rho = -K * T * e^(-r*T) * N(-d2) / 100
-    results[i].rho = -0.01 * K[i] * T[i] * dr * Nd2;
-  }
-}
-
-void VectorDouble::EuropeanCallGreek(const double *S, const double *K,
-                                     const double *r, const double *q,
-                                     const double *vol, const double *T,
-                                     GreekDouble *results, size_t size) {
-  for (size_t i = 0; i < size; ++i) {
-    // Handle degenerate cases
-    if (vol[i] <= 0.0 || T[i] <= 0.0) {
-      results[i].price = std::max(0.0, S[i] - K[i]);
-      results[i].delta = (S[i] > K[i]) ? 1.0 : 0.0;
-      results[i].gamma = 0.0;
-      results[i].vega = 0.0;
-      results[i].theta = 0.0;
-      results[i].rho = 0.0;
-      continue;
-    }
-
-    // Calculate d1 and d2
-    double sqrt_T = std::sqrt(T[i]);
-    double d1 =
-        (std::log(S[i] / K[i]) + (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) /
-        (vol[i] * sqrt_T);
-    double d2 = d1 - vol[i] * sqrt_T;
-
-    // Calculate discount factors
-    double dr = std::exp(-r[i] * T[i]);
-    double dq = std::exp(-q[i] * T[i]);
-
-    // Calculate N(d1) and N(d2)
-    double Nd1 = 0.5 * (1.0 + std::erf(d1 / std::sqrt(2.0)));
-    double Nd2 = 0.5 * (1.0 + std::erf(d2 / std::sqrt(2.0)));
-
-    // Calculate option price
-    results[i].price = S[i] * dq * Nd1 - K[i] * dr * Nd2;
-
-    // Calculate PDF for Greeks
-    double pdf_d1 = std::exp(-0.5 * d1 * d1) / std::sqrt(2.0 * M_PI);
-
-    // Delta = e^(-q*T) * N(d1)
-    results[i].delta = dq * Nd1;
-
-    // Gamma = e^(-q*T) * PDF(d1) / (S * vol * sqrt(T))
-    results[i].gamma = dq * pdf_d1 / (S[i] * vol[i] * sqrt_T);
-
-    // Vega = S * e^(-q*T) * PDF(d1) * sqrt(T) / 100
-    results[i].vega = 0.01 * S[i] * dq * pdf_d1 * sqrt_T;
-
-    // Theta calculation (daily)
-    double term1 = -S[i] * dq * pdf_d1 * vol[i] / (2.0 * sqrt_T);
-    double term2 = -q[i] * S[i] * dq * Nd1;
-    double term3 = r[i] * K[i] * dr * Nd2;
-    results[i].theta = (term1 + term2 + term3) / 365.0;
-
-    // Rho = K * T * e^(-r*T) * N(d2) / 100
-    results[i].rho = 0.01 * K[i] * T[i] * dr * Nd2;
-  }
-}
-
-void VectorDouble::AmericanPut(const double *S, const double *K,
-                               const double *r, const double *q,
-                               const double *vol, const double *T,
-                               double *results, size_t size) {
-  for (size_t i = 0; i < size; ++i) {
-    // First calculate European price
-    double bs_price = 0.0;
-
-    // Use Black-Scholes formula directly
-    if (vol[i] <= 0.0 || T[i] <= 0.0) {
-      bs_price = std::max(0.0, K[i] - S[i]);
-    } else {
-      double d1 = (std::log(S[i] / K[i]) +
-                   (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) /
-                  (vol[i] * std::sqrt(T[i]));
-      double d2 = d1 - vol[i] * std::sqrt(T[i]);
-
-      double Nd1 = 0.5 * (1.0 + std::erf(-d1 / std::sqrt(2.0)));
-      double Nd2 = 0.5 * (1.0 + std::erf(-d2 / std::sqrt(2.0)));
-
-      bs_price = K[i] * std::exp(-r[i] * T[i]) * Nd2 -
-                 S[i] * std::exp(-q[i] * T[i]) * Nd1;
-    }
-
-    // Check if early exercise might be valuable
-    double premium = 0.0;
-    if (r[i] > q[i]) {
-      // Calculate approximate critical price
-      double num = 1.0 - std::exp(-r[i] * T[i]);
-      double denom = 1.0 - std::exp(-q[i] * T[i]);
-      if (denom == 0.0)
-        denom = 1.0;
-
-      double b_star = K[i] * num / denom;
-
-      // If S <= b*, calculate approximate early exercise premium
-      if (S[i] <= b_star) {
-        double power = 2.0 * r[i] / (vol[i] * vol[i]);
-        double ratio_pow = std::pow(S[i] / b_star, power);
-        premium = std::max(0.0, K[i] - S[i] - (K[i] - b_star) * ratio_pow);
-      }
-    }
-
-    results[i] = bs_price + premium;
-  }
-}
-
-void VectorDouble::AmericanCall(const double *S, const double *K,
-                                const double *r, const double *q,
-                                const double *vol, const double *T,
-                                double *results, size_t size) {
-  for (size_t i = 0; i < size; ++i) {
-    // For zero dividend, American call = European call
-    if (q[i] <= 0.0) {
-      // European call formula
-      if (vol[i] <= 0.0 || T[i] <= 0.0) {
-        results[i] = std::max(0.0, S[i] - K[i]);
+    if (vol_arr[i] <= 1e-12 || T_arr[i] <= 1e-12) {
+        result_arr[i] = std::max(0.0, S_arr[i] - K_arr[i]);
         continue;
-      }
-
-      double d1 = (std::log(S[i] / K[i]) +
-                   (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) /
-                  (vol[i] * std::sqrt(T[i]));
-      double d2 = d1 - vol[i] * std::sqrt(T[i]);
-
-      double Nd1 = 0.5 * (1.0 + std::erf(d1 / std::sqrt(2.0)));
-      double Nd2 = 0.5 * (1.0 + std::erf(d2 / std::sqrt(2.0)));
-
-      results[i] = S[i] * std::exp(-q[i] * T[i]) * Nd1 -
-                   K[i] * std::exp(-r[i] * T[i]) * Nd2;
-    } else {
-      // Calculate the critical price
-      double q1 =
-          0.5 * (-(r[i] - q[i]) / (vol[i] * vol[i]) +
-                 std::sqrt(std::pow((r[i] - q[i]) / (vol[i] * vol[i]), 2.0) +
-                           8.0 * r[i] / (vol[i] * vol[i])));
-
-      double critical_price = K[i] / (1.0 - 1.0 / q1);
-
-      // Check if early exercise is optimal
-      if (S[i] >= critical_price) {
-        results[i] = S[i] - K[i]; // Intrinsic value
-      } else {
-        // Calculate European price
-        double d1 = (std::log(S[i] / K[i]) +
-                     (r[i] - q[i] + 0.5 * vol[i] * vol[i]) * T[i]) /
-                    (vol[i] * std::sqrt(T[i]));
-        double d2 = d1 - vol[i] * std::sqrt(T[i]);
-
-        double Nd1 = 0.5 * (1.0 + std::erf(d1 / std::sqrt(2.0)));
-        double Nd2 = 0.5 * (1.0 + std::erf(d2 / std::sqrt(2.0)));
-
-        double euro_price = S[i] * std::exp(-q[i] * T[i]) * Nd1 -
-                            K[i] * std::exp(-r[i] * T[i]) * Nd2;
-
-        // Add early exercise premium
-        double ratio = std::pow(S[i] / critical_price, q1);
-        double premium = (critical_price - K[i]) * (1.0 - ratio);
-
-        results[i] = euro_price + premium;
-      }
     }
+    double d1 = scalar_bs_d1(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
+    double d2 = d1 - vol_arr[i] * std::sqrt(T_arr[i]);
+    result_arr[i] = S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_nd(d1) -
+                    K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * scalar_bs_nd(d2);
   }
 }
 
-void VectorSingle::EuropeanPut(const float *S, const float *K, const float *r,
-                               const float *q, const float *vol, const float *T,
-                               float *result, size_t size) {
-  // Process in steps of 8 (AVX2 single precision)
+void VectorDouble::EuropeanPutGreek(const double *S_arr, const double *K_arr,
+                                    const double *r_arr, const double *q_arr,
+                                    const double *vol_arr, const double *T_arr,
+                                    GreekDouble *results_arr, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        if (vol_arr[i] <= 1e-12 || T_arr[i] <= 1e-12) {
+            results_arr[i].price = std::max(0.0, K_arr[i] - S_arr[i]);
+            results_arr[i].delta = (S_arr[i] < K_arr[i]) ? -1.0 : 0.0;
+            results_arr[i].gamma = 0.0;
+            results_arr[i].vega  = 0.0;
+            results_arr[i].theta = r_arr[i] * K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) - q_arr[i] * S_arr[i] * std::exp(-q_arr[i] * T_arr[i]); // Simplified
+             if (results_arr[i].price > 0) results_arr[i].theta /= 365.0; else results_arr[i].theta = 0;
+            results_arr[i].rho   = -K_arr[i] * T_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * 0.01;
+            if (results_arr[i].price == 0.0) results_arr[i].rho = 0.0; // if valueless, no rho
+            continue;
+        }
+
+        double d1 = scalar_bs_d1(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
+        double d2 = d1 - vol_arr[i] * std::sqrt(T_arr[i]);
+
+        results_arr[i].price = K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * scalar_bs_nd(-d2) -
+                               S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_nd(-d1);
+        results_arr[i].delta = std::exp(-q_arr[i] * T_arr[i]) * (scalar_bs_nd(d1) - 1.0);
+        results_arr[i].gamma = std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_pdf(d1) / (S_arr[i] * vol_arr[i] * std::sqrt(T_arr[i]));
+        results_arr[i].vega  = S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_pdf(d1) * std::sqrt(T_arr[i]) * 0.01;
+        
+        double theta_term1 = - S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_pdf(d1) * vol_arr[i] / (2.0 * std::sqrt(T_arr[i]));
+        double theta_term2 =   q_arr[i] * S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_nd(-d1);
+        double theta_term3 = - r_arr[i] * K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * scalar_bs_nd(-d2);
+        results_arr[i].theta = (theta_term1 + theta_term2 + theta_term3) / 365.0;
+        results_arr[i].rho   = -K_arr[i] * T_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * scalar_bs_nd(-d2) * 0.01;
+    }
+}
+
+void VectorDouble::EuropeanCallGreek(const double *S_arr, const double *K_arr,
+                                     const double *r_arr, const double *q_arr,
+                                     const double *vol_arr, const double *T_arr,
+                                     GreekDouble *results_arr, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        if (vol_arr[i] <= 1e-12 || T_arr[i] <= 1e-12) {
+            results_arr[i].price = std::max(0.0, S_arr[i] - K_arr[i]);
+            results_arr[i].delta = (S_arr[i] > K_arr[i]) ? 1.0 : 0.0;
+            results_arr[i].gamma = 0.0;
+            results_arr[i].vega  = 0.0;
+            results_arr[i].theta = -r_arr[i] * K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) + q_arr[i] * S_arr[i] * std::exp(-q_arr[i] * T_arr[i]); // Simplified
+            if (results_arr[i].price > 0) results_arr[i].theta /= 365.0; else results_arr[i].theta = 0;
+            results_arr[i].rho   = K_arr[i] * T_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * 0.01;
+            if (results_arr[i].price == 0.0) results_arr[i].rho = 0.0;
+            continue;
+        }
+
+        double d1 = scalar_bs_d1(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
+        double d2 = d1 - vol_arr[i] * std::sqrt(T_arr[i]);
+
+        results_arr[i].price = S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_nd(d1) -
+                               K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * scalar_bs_nd(d2);
+        results_arr[i].delta = std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_nd(d1);
+        results_arr[i].gamma = std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_pdf(d1) / (S_arr[i] * vol_arr[i] * std::sqrt(T_arr[i]));
+        results_arr[i].vega  = S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_pdf(d1) * std::sqrt(T_arr[i]) * 0.01;
+
+        double theta_term1 = - S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_pdf(d1) * vol_arr[i] / (2.0 * std::sqrt(T_arr[i]));
+        double theta_term2 = - q_arr[i] * S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * scalar_bs_nd(d1);
+        double theta_term3 =   r_arr[i] * K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * scalar_bs_nd(d2);
+        results_arr[i].theta = (theta_term1 + theta_term2 + theta_term3) / 365.0;
+        results_arr[i].rho   = K_arr[i] * T_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * scalar_bs_nd(d2) * 0.01;
+    }
+}
+
+// Robust Barone-Adesi-Whaley Approximation (Scalar Double)
+double scalar_baw_put_approx(double S, double K, double r, double q, double vol, double T) {
+    if (T <= 1e-9) return std::max(0.0, K - S); // Intrinsic for zero time
+    if (vol <= 1e-9) return std::max(0.0, K * std::exp(-r * T) - S * std::exp(-q * T)); // Discounted intrinsic
+
+    double euro_put = K * std::exp(-r * T) * scalar_bs_nd(-scalar_bs_d1(S,K,r,q,vol,T) + vol*std::sqrt(T)) - 
+                      S * std::exp(-q * T) * scalar_bs_nd(-scalar_bs_d1(S,K,r,q,vol,T));
+
+    if (r <= q || r <= 1e-9) { // Condition where early exercise is not expected or BAW is problematic
+        return std::max(euro_put, K - S);
+    }
+
+    double b = r - q;
+    double M = 2.0 * r / (vol * vol);
+    double N_baw = 2.0 * b / (vol * vol);
+    
+    double q2_num = -(N_baw - 1.0) + std::sqrt((N_baw - 1.0) * (N_baw - 1.0) + 4.0 * M);
+    double q2 = 0.5 * q2_num;
+
+    if (q2 <= 1.0 + 1e-9) { // Critical price would be problematic or infinite
+        return std::max(euro_put, K - S);
+    }
+    
+    // Critical stock price (S_star)
+    // S_star = K / (1 - 1/q2) = K * q2 / (q2 - 1)
+    double S_star = K * q2 / (q2 - 1.0);
+
+    if (S <= S_star) {
+        return K - S;
+    } else {
+        double d1_S_star = scalar_bs_d1(S, S_star, r, q, vol, T); // d1 with S_star as strike for A2
+        double A2 = (S_star / q2) * (1.0 - std::exp((b - r) * T) * scalar_bs_nd(-d1_S_star));
+        double premium_val = euro_put + A2 * std::pow(S / S_star, -q2);
+        return std::max(premium_val, K-S); // Ensure not less than intrinsic
+    }
+}
+
+double scalar_baw_call_approx(double S, double K, double r, double q, double vol, double T) {
+    if (q <= 1e-9) { // No dividend, American Call = European Call
+        if (T <= 1e-9 || vol <= 1e-9) return std::max(0.0, S - K);
+        double d1 = scalar_bs_d1(S,K,r,q,vol,T);
+        double d2 = d1 - vol*std::sqrt(T);
+        return S * std::exp(-q*T) * scalar_bs_nd(d1) - K * std::exp(-r*T) * scalar_bs_nd(d2);
+    }
+    if (T <= 1e-9) return std::max(0.0, S - K);
+    if (vol <= 1e-9) return std::max(0.0, S * std::exp(-q * T) - K * std::exp(-r * T));
+
+
+    double euro_call = S * std::exp(-q * T) * scalar_bs_nd(scalar_bs_d1(S,K,r,q,vol,T)) - 
+                       K * std::exp(-r * T) * scalar_bs_nd(scalar_bs_d1(S,K,r,q,vol,T) - vol*std::sqrt(T));
+    
+    double b = r - q;
+    double M = 2.0 * r / (vol*vol);
+    double N_baw = 2.0 * b / (vol*vol);
+
+    double q1_num = -(N_baw - 1.0) - std::sqrt( (N_baw - 1.0)*(N_baw - 1.0) + 4.0*M); // Note the minus before sqrt for call's q1
+    double q1 = 0.5 * q1_num;
+
+    if (q1 >= -1e-9 || std::abs(q1 - 1.0) < 1e-9 ) { // S_star would be problematic
+         return std::max(euro_call, S - K);
+    }
+
+    // Critical stock price S_star = K / (1 - 1/q1) = K * q1 / (q1 - 1)
+    double S_star = K * q1 / (q1 - 1.0);
+
+    if (S >= S_star) {
+        return S - K;
+    } else {
+        double d1_S_star = scalar_bs_d1(S, S_star, r, q, vol, T); // d1 with S_star as strike for A1
+        double A1 = -(S_star / q1) * (1.0 - std::exp((b - r) * T) * scalar_bs_nd(d1_S_star));
+        double premium_val = euro_call + A1 * std::pow(S / S_star, q1);
+        return std::max(premium_val, S-K);
+    }
+}
+
+
+void VectorDouble::AmericanPutApprox(const double *S_arr, const double *K_arr,
+                                    const double *r_arr, const double *q_arr,
+                                    const double *vol_arr, const double *T_arr,
+                                    double *result_arr, size_t size) {
+    // For now, we use the scalar robust BAW approximation.
+    // SIMD version would require vectorizing the BAW logic carefully.
+    for(size_t i=0; i<size; ++i) {
+        result_arr[i] = scalar_baw_put_approx(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
+    }
+}
+
+void VectorDouble::AmericanCallApprox(const double *S_arr, const double *K_arr,
+                                     const double *r_arr, const double *q_arr,
+                                     const double *vol_arr, const double *T_arr,
+                                     double *result_arr, size_t size) {
+    for(size_t i=0; i<size; ++i) {
+        result_arr[i] = scalar_baw_call_approx(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
+    }
+}
+
+// --- VectorSingle Implementations ---
+void VectorSingle::EuropeanPut(const float *S_arr, const float *K_arr,
+                               const float *r_arr, const float *q_arr,
+                               const float *vol_arr, const float *T_arr,
+                               float *result_arr, size_t size) {
   size_t i = 0;
-  for (; i + 7 < size; i += 8) {
-    // Load vectors
-    __m256 S_vec = SimdOperationSingle::load(S + i);
-    __m256 K_vec = SimdOperationSingle::load(K + i);
-    __m256 r_vec = SimdOperationSingle::load(r + i);
-    __m256 q_vec = SimdOperationSingle::load(q + i);
-    __m256 vol_vec = SimdOperationSingle::load(vol + i);
-    __m256 T_vec = SimdOperationSingle::load(T + i);
+  const size_t avx2_step = 8; 
 
-    // Calculate option prices
-    __m256 prices = SimdOperationSingle::EuropeanPut(S_vec, K_vec, r_vec, q_vec,
-                                                     vol_vec, T_vec);
+  for (; i + (avx2_step - 1) < size; i += avx2_step) {
+    __m256 S_vec = SimdOperationSingle::load(S_arr + i);
+    __m256 K_vec = SimdOperationSingle::load(K_arr + i);
+    __m256 r_vec = SimdOperationSingle::load(r_arr + i);
+    __m256 q_vec = SimdOperationSingle::load(q_arr + i);
+    __m256 vol_vec = SimdOperationSingle::load(vol_arr + i);
+    __m256 T_vec = SimdOperationSingle::load(T_arr + i);
 
-    // Store results
-    SimdOperationSingle::store(result + i, prices);
+    __m256 prices = SimdOperationSingle::EuropeanPut(S_vec, K_vec, r_vec,
+                                                     q_vec, vol_vec, T_vec);
+    SimdOperationSingle::store(result_arr + i, prices);
   }
 
-  // Handle remaining elements
   for (; i < size; ++i) {
-    // Use scalar calculation
-    float d1 = (std::log(S[i] / K[i]) +
-                (r[i] - q[i] + 0.5f * vol[i] * vol[i]) * T[i]) /
-               (vol[i] * std::sqrt(T[i]));
-    float d2 = d1 - vol[i] * std::sqrt(T[i]);
-
-    float Nd1 = 0.5f * (1.0f + num::fast_erf(-d1 / 1.414213562f));
-    float Nd2 = 0.5f * (1.0f + num::fast_erf(-d2 / 1.414213562f));
-
-    result[i] = K[i] * std::exp(-r[i] * T[i]) * Nd2 -
-                S[i] * std::exp(-q[i] * T[i]) * Nd1;
+     if (vol_arr[i] <= 1e-7f || T_arr[i] <= 1e-7f) { 
+        result_arr[i] = std::max(0.0f, K_arr[i] - S_arr[i]);
+        continue;
+    }
+    float d1 = scalar_bs_d1_f(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
+    float d2 = d1 - vol_arr[i] * std::sqrt(T_arr[i]);
+    result_arr[i] = K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * num::fast_normal_cdf(-d2) -
+                    S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * num::fast_normal_cdf(-d1);
   }
 }
 
-void VectorSingle::EuropeanCall(const float *S, const float *K, const float *r,
-                                const float *q, const float *vol,
-                                const float *T, float *result, size_t size) {
-  // Process in steps of 8 (AVX2 single precision)
+void VectorSingle::EuropeanCall(const float *S_arr, const float *K_arr,
+                                const float *r_arr, const float *q_arr,
+                                const float *vol_arr, const float *T_arr,
+                                float *result_arr, size_t size) {
   size_t i = 0;
-  for (; i + 7 < size; i += 8) {
-    // Load vectors
-    __m256 S_vec = SimdOperationSingle::load(S + i);
-    __m256 K_vec = SimdOperationSingle::load(K + i);
-    __m256 r_vec = SimdOperationSingle::load(r + i);
-    __m256 q_vec = SimdOperationSingle::load(q + i);
-    __m256 vol_vec = SimdOperationSingle::load(vol + i);
-    __m256 T_vec = SimdOperationSingle::load(T + i);
+  const size_t avx2_step = 8;
 
-    // Calculate option prices
+  for (; i + (avx2_step-1) < size; i += avx2_step) {
+    __m256 S_vec = SimdOperationSingle::load(S_arr + i);
+    __m256 K_vec = SimdOperationSingle::load(K_arr + i);
+    __m256 r_vec = SimdOperationSingle::load(r_arr + i);
+    __m256 q_vec = SimdOperationSingle::load(q_arr + i);
+    __m256 vol_vec = SimdOperationSingle::load(vol_arr + i);
+    __m256 T_vec = SimdOperationSingle::load(T_arr + i);
+
     __m256 prices = SimdOperationSingle::EuropeanCall(S_vec, K_vec, r_vec,
                                                       q_vec, vol_vec, T_vec);
-
-    // Store results
-    SimdOperationSingle::store(result + i, prices);
+    SimdOperationSingle::store(result_arr + i, prices);
   }
-
-  // Handle remaining elements
   for (; i < size; ++i) {
-    // Use scalar calculation
-    float d1 = (std::log(S[i] / K[i]) +
-                (r[i] - q[i] + 0.5f * vol[i] * vol[i]) * T[i]) /
-               (vol[i] * std::sqrt(T[i]));
-    float d2 = d1 - vol[i] * std::sqrt(T[i]);
-
-    float Nd1 = 0.5f * (1.0f + num::fast_erf(d1 / 1.414213562f));
-    float Nd2 = 0.5f * (1.0f + num::fast_erf(d2 / 1.414213562f));
-
-    result[i] = S[i] * std::exp(-q[i] * T[i]) * Nd1 -
-                K[i] * std::exp(-r[i] * T[i]) * Nd2;
+    if (vol_arr[i] <= 1e-7f || T_arr[i] <= 1e-7f) {
+        result_arr[i] = std::max(0.0f, S_arr[i] - K_arr[i]);
+        continue;
+    }
+    float d1 = scalar_bs_d1_f(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
+    float d2 = d1 - vol_arr[i] * std::sqrt(T_arr[i]);
+    result_arr[i] = S_arr[i] * std::exp(-q_arr[i] * T_arr[i]) * num::fast_normal_cdf(d1) -
+                    K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * num::fast_normal_cdf(d2);
   }
 }
 
-void VectorSingle::EuropeanPutGreek(const float *S, const float *K,
-                                    const float *r, const float *q,
-                                    const float *vol, const float *T,
-                                    GreekSingle *results, size_t size) {
-  for (size_t i = 0; i < size; ++i) {
-    // Handle degenerate cases
-    if (vol[i] <= 0.0f || T[i] <= 0.0f) {
-      results[i].price = std::max(0.0f, K[i] - S[i]);
-      results[i].delta = (S[i] < K[i]) ? -1.0f : 0.0f;
-      results[i].gamma = 0.0f;
-      results[i].vega = 0.0f;
-      results[i].theta = 0.0f;
-      results[i].rho = 0.0f;
-      continue;
+void VectorSingle::EuropeanPutGreek(const float *S_arr, const float *K_arr,
+                                    const float *r_arr, const float *q_arr,
+                                    const float *vol_arr, const float *T_arr,
+                                    GreekSingle *results_arr, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        if (vol_arr[i] <= 1e-7f || T_arr[i] <= 1e-7f) {
+            results_arr[i].price = std::max(0.0f, K_arr[i] - S_arr[i]);
+            results_arr[i].delta = (S_arr[i] < K_arr[i]) ? -1.0f : 0.0f;
+            results_arr[i].gamma = 0.0f;
+            results_arr[i].vega  = 0.0f;
+            results_arr[i].theta = r_arr[i] * K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) - q_arr[i] * S_arr[i] * std::exp(-q_arr[i] * T_arr[i]);
+            if (results_arr[i].price > 0.0f) results_arr[i].theta /= 365.0f; else results_arr[i].theta = 0.0f;
+            results_arr[i].rho   = -K_arr[i] * T_arr[i] * std::exp(-r_arr[i] * T_arr[i]) * 0.01f;
+            if (results_arr[i].price == 0.0f) results_arr[i].rho = 0.0f;
+            continue;
+        }
+        float d1 = scalar_bs_d1_f(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
+        float d2 = d1 - vol_arr[i] * std::sqrt(T_arr[i]);
+
+        results_arr[i].price = K_arr[i]*std::exp(-r_arr[i]*T_arr[i])*num::fast_normal_cdf(-d2) - S_arr[i]*std::exp(-q_arr[i]*T_arr[i])*num::fast_normal_cdf(-d1);
+        results_arr[i].delta = std::exp(-q_arr[i]*T_arr[i]) * (num::fast_normal_cdf(d1) - 1.0f);
+        results_arr[i].gamma = std::exp(-q_arr[i]*T_arr[i]) * num::fast_normal_pdf(d1) / (S_arr[i]*vol_arr[i]*std::sqrt(T_arr[i]));
+        results_arr[i].vega  = S_arr[i]*std::exp(-q_arr[i]*T_arr[i]) * num::fast_normal_pdf(d1) * std::sqrt(T_arr[i]) * 0.01f;
+        float theta_term1 = -S_arr[i]*std::exp(-q_arr[i]*T_arr[i])*num::fast_normal_pdf(d1)*vol_arr[i]/(2.0f*std::sqrt(T_arr[i]));
+        float theta_term2 =  q_arr[i]*S_arr[i]*std::exp(-q_arr[i]*T_arr[i])*num::fast_normal_cdf(-d1);
+        float theta_term3 = -r_arr[i]*K_arr[i]*std::exp(-r_arr[i]*T_arr[i])*num::fast_normal_cdf(-d2);
+        results_arr[i].theta = (theta_term1 + theta_term2 + theta_term3) / 365.0f;
+        results_arr[i].rho   = -K_arr[i]*T_arr[i]*std::exp(-r_arr[i]*T_arr[i])*num::fast_normal_cdf(-d2) * 0.01f;
+    }
+}
+
+void VectorSingle::EuropeanCallGreek(const float *S_arr, const float *K_arr,
+                                     const float *r_arr, const float *q_arr,
+                                     const float *vol_arr, const float *T_arr,
+                                     GreekSingle *results_arr, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        if (vol_arr[i] <= 1e-7f || T_arr[i] <= 1e-7f) {
+            results_arr[i].price = std::max(0.0f, S_arr[i] - K_arr[i]);
+            results_arr[i].delta = (S_arr[i] > K_arr[i]) ? 1.0f : 0.0f;
+            results_arr[i].gamma = 0.0f;
+            results_arr[i].vega  = 0.0f;
+            results_arr[i].theta = -r_arr[i] * K_arr[i] * std::exp(-r_arr[i] * T_arr[i]) + q_arr[i] * S_arr[i] * std::exp(-q_arr[i] * T_arr[i]);
+             if (results_arr[i].price > 0.0f) results_arr[i].theta /= 365.0f; else results_arr[i].theta = 0.0f;
+            results_arr[i].rho   = K_arr[i]*T_arr[i]*std::exp(-r_arr[i]*T_arr[i])*0.01f;
+            if (results_arr[i].price == 0.0f) results_arr[i].rho = 0.0f;
+            continue;
+        }
+        float d1 = scalar_bs_d1_f(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
+        float d2 = d1 - vol_arr[i]*std::sqrt(T_arr[i]);
+        results_arr[i].price = S_arr[i]*std::exp(-q_arr[i]*T_arr[i])*num::fast_normal_cdf(d1) - K_arr[i]*std::exp(-r_arr[i]*T_arr[i])*num::fast_normal_cdf(d2);
+        results_arr[i].delta = std::exp(-q_arr[i]*T_arr[i]) * num::fast_normal_cdf(d1);
+        results_arr[i].gamma = std::exp(-q_arr[i]*T_arr[i]) * num::fast_normal_pdf(d1) / (S_arr[i]*vol_arr[i]*std::sqrt(T_arr[i]));
+        results_arr[i].vega  = S_arr[i]*std::exp(-q_arr[i]*T_arr[i]) * num::fast_normal_pdf(d1) * std::sqrt(T_arr[i]) * 0.01f;
+        float theta_term1 = -S_arr[i]*std::exp(-q_arr[i]*T_arr[i])*num::fast_normal_pdf(d1)*vol_arr[i]/(2.0f*std::sqrt(T_arr[i]));
+        float theta_term2 = -q_arr[i]*S_arr[i]*std::exp(-q_arr[i]*T_arr[i])*num::fast_normal_cdf(d1);
+        float theta_term3 =  r_arr[i]*K_arr[i]*std::exp(-r_arr[i]*T_arr[i])*num::fast_normal_cdf(d2);
+        results_arr[i].theta = (theta_term1 + theta_term2 + theta_term3) / 365.0f;
+        results_arr[i].rho   = K_arr[i]*T_arr[i]*std::exp(-r_arr[i]*T_arr[i])*num::fast_normal_cdf(d2) * 0.01f;
+    }
+}
+
+
+// Robust Barone-Adesi-Whaley Approximation (Scalar Single Precision)
+float scalar_baw_put_approx_f(float S, float K, float r, float q, float vol, float T) {
+    if (T <= 1e-7f) return std::max(0.0f, K - S);
+    if (vol <= 1e-7f) return std::max(0.0f, K * std::exp(-r * T) - S * std::exp(-q * T));
+
+    float euro_put = K * std::exp(-r * T) * num::fast_normal_cdf(-scalar_bs_d1_f(S,K,r,q,vol,T) + vol*std::sqrt(T)) - 
+                     S * std::exp(-q * T) * num::fast_normal_cdf(-scalar_bs_d1_f(S,K,r,q,vol,T));
+
+    if (r <= q || r <= 1e-7f) {
+        return std::max(euro_put, K - S);
     }
 
-    // Calculate d1 and d2
-    float sqrt_T = std::sqrt(T[i]);
-    float d1 = (std::log(S[i] / K[i]) +
-                (r[i] - q[i] + 0.5f * vol[i] * vol[i]) * T[i]) /
-               (vol[i] * sqrt_T);
-    float d2 = d1 - vol[i] * sqrt_T;
+    float b = r - q;
+    float M = 2.0f * r / (vol * vol);
+    float N_baw = 2.0f * b / (vol * vol);
+    
+    float q2_num = -(N_baw - 1.0f) + std::sqrt((N_baw - 1.0f) * (N_baw - 1.0f) + 4.0f * M);
+    float q2 = 0.5f * q2_num;
 
-    // Calculate discount factors
-    float dr = std::exp(-r[i] * T[i]);
-    float dq = std::exp(-q[i] * T[i]);
-
-    // Calculate N(-d1) and N(-d2)
-    float Nd1 = 0.5f * (1.0f + num::fast_erf(-d1 / 1.414213562f));
-    float Nd2 = 0.5f * (1.0f + num::fast_erf(-d2 / 1.414213562f));
-
-    // Calculate option price
-    results[i].price = K[i] * dr * Nd2 - S[i] * dq * Nd1;
-
-    // Calculate PDF for Greeks
-    float pdf_d1 = std::exp(-0.5f * d1 * d1) / 2.506628275f; // 1/sqrt(2π)
-
-    // Delta = -e^(-q*T) * N(-d1)
-    results[i].delta = -dq * Nd1;
-
-    // Gamma = e^(-q*T) * PDF(d1) / (S * vol * sqrt(T))
-    results[i].gamma = dq * pdf_d1 / (S[i] * vol[i] * sqrt_T);
-
-    // Vega = S * e^(-q*T) * PDF(d1) * sqrt(T) / 100
-    results[i].vega = 0.01f * S[i] * dq * pdf_d1 * sqrt_T;
-
-    // Theta calculation (daily)
-    float term1 = -S[i] * dq * pdf_d1 * vol[i] / (2.0f * sqrt_T);
-    float term2 = q[i] * S[i] * dq * Nd1;
-    float term3 = -r[i] * K[i] * dr * Nd2;
-    results[i].theta = (term1 + term2 + term3) / 365.0f;
-
-    // Rho = -K * T * e^(-r*T) * N(-d2) / 100
-    results[i].rho = -0.01f * K[i] * T[i] * dr * Nd2;
-  }
-}
-
-void VectorSingle::EuropeanCallGreek(const float *S, const float *K,
-                                     const float *r, const float *q,
-                                     const float *vol, const float *T,
-                                     GreekSingle *results, size_t size) {
-  for (size_t i = 0; i < size; ++i) {
-    // Handle degenerate cases
-    if (vol[i] <= 0.0f || T[i] <= 0.0f) {
-      results[i].price = std::max(0.0f, S[i] - K[i]);
-      results[i].delta = (S[i] > K[i]) ? 1.0f : 0.0f;
-      results[i].gamma = 0.0f;
-      results[i].vega = 0.0f;
-      results[i].theta = 0.0f;
-      results[i].rho = 0.0f;
-      continue;
+    if (q2 <= 1.0f + 1e-7f) {
+        return std::max(euro_put, K-S);
     }
+    
+    float S_star = K * q2 / (q2 - 1.0f);
 
-    // Calculate d1 and d2
-    float sqrt_T = std::sqrt(T[i]);
-    float d1 = (std::log(S[i] / K[i]) +
-                (r[i] - q[i] + 0.5f * vol[i] * vol[i]) * T[i]) /
-               (vol[i] * sqrt_T);
-    float d2 = d1 - vol[i] * sqrt_T;
-
-    // Calculate discount factors
-    float dr = std::exp(-r[i] * T[i]);
-    float dq = std::exp(-q[i] * T[i]);
-
-    // Calculate N(d1) and N(d2)
-    float Nd1 = 0.5f * (1.0f + num::fast_erf(d1 / 1.414213562f));
-    float Nd2 = 0.5f * (1.0f + num::fast_erf(d2 / 1.414213562f));
-
-    // Calculate option price
-    results[i].price = S[i] * dq * Nd1 - K[i] * dr * Nd2;
-
-    // Calculate PDF for Greeks
-    float pdf_d1 = std::exp(-0.5f * d1 * d1) / 2.506628275f; // 1/sqrt(2π)
-
-    // Delta = e^(-q*T) * N(d1)
-    results[i].delta = dq * Nd1;
-
-    // Gamma = e^(-q*T) * PDF(d1) / (S * vol * sqrt(T))
-    results[i].gamma = dq * pdf_d1 / (S[i] * vol[i] * sqrt_T);
-
-    // Vega = S * e^(-q*T) * PDF(d1) * sqrt(T) / 100
-    results[i].vega = 0.01f * S[i] * dq * pdf_d1 * sqrt_T;
-
-    // Theta calculation (daily)
-    float term1 = -S[i] * dq * pdf_d1 * vol[i] / (2.0f * sqrt_T);
-    float term2 = -q[i] * S[i] * dq * Nd1;
-    float term3 = r[i] * K[i] * dr * Nd2;
-    results[i].theta = (term1 + term2 + term3) / 365.0f;
-
-    // Rho = K * T * e^(-r*T) * N(d2) / 100
-    results[i].rho = 0.01f * K[i] * T[i] * dr * Nd2;
-  }
-}
-
-void VectorSingle::AmericanPut(const float *S, const float *K, const float *r,
-                               const float *q, const float *vol, const float *T,
-                               float *results, size_t size) {
-  // Process in steps of 8 (AVX2 single precision)
-  size_t i = 0;
-  for (; i + 7 < size; i += 8) {
-    // Load vectors
-    __m256 S_vec = SimdOperationSingle::load(S + i);
-    __m256 K_vec = SimdOperationSingle::load(K + i);
-    __m256 r_vec = SimdOperationSingle::load(r + i);
-    __m256 q_vec = SimdOperationSingle::load(q + i);
-    __m256 vol_vec = SimdOperationSingle::load(vol + i);
-    __m256 T_vec = SimdOperationSingle::load(T + i);
-
-    // Calculate option prices
-    __m256 prices = SimdOperationSingle::AmericanPut(S_vec, K_vec, r_vec, q_vec,
-                                                     vol_vec, T_vec);
-
-    // Store results
-    SimdOperationSingle::store(results + i, prices);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    // First calculate European price
-    float bs_price = 0.0f;
-
-    // Use Black-Scholes formula directly
-    if (vol[i] <= 0.0f || T[i] <= 0.0f) {
-      bs_price = std::max(0.0f, K[i] - S[i]);
+    if (S <= S_star) {
+        return K - S;
     } else {
-      float d1 = (std::log(S[i] / K[i]) +
-                  (r[i] - q[i] + 0.5f * vol[i] * vol[i]) * T[i]) /
-                 (vol[i] * std::sqrt(T[i]));
-      float d2 = d1 - vol[i] * std::sqrt(T[i]);
-
-      float Nd1 = 0.5f * (1.0f + num::fast_erf(-d1 / 1.414213562f));
-      float Nd2 = 0.5f * (1.0f + num::fast_erf(-d2 / 1.414213562f));
-
-      bs_price = K[i] * std::exp(-r[i] * T[i]) * Nd2 -
-                 S[i] * std::exp(-q[i] * T[i]) * Nd1;
+        float d1_S_star = scalar_bs_d1_f(S, S_star, r, q, vol, T);
+        float A2 = (S_star / q2) * (1.0f - std::exp((b - r) * T) * num::fast_normal_cdf(-d1_S_star));
+        float premium_val = euro_put + A2 * std::pow(S / S_star, -q2);
+        return std::max(premium_val, K-S);
     }
+}
 
-    // Check if early exercise is potentially valuable
-    float premium = 0.0f;
-    if (r[i] > q[i]) {
-      // Calculate critical price using the quadratic approximation
-      float b = K[i] * (1.0f - std::exp(-r[i] * T[i]));
-      if (q[i] > 0.0f) {
-        b /= (1.0f - std::exp(-q[i] * T[i]));
-      }
-
-      // If S is below critical price, apply approximation
-      if (S[i] <= b) {
-        float power = 2.0f * r[i] / (vol[i] * vol[i]);
-        float ratio = std::pow(S[i] / b, power);
-        premium = std::max(0.0f, K[i] - S[i] - (K[i] - b) * ratio);
-      }
+float scalar_baw_call_approx_f(float S, float K, float r, float q, float vol, float T) {
+    if (q <= 1e-7f) { // No dividend
+        if (T <= 1e-7f || vol <= 1e-7f) return std::max(0.0f, S - K);
+        float d1 = scalar_bs_d1_f(S,K,r,q,vol,T);
+        float d2 = d1 - vol*std::sqrt(T);
+        return S * std::exp(-q*T) * num::fast_normal_cdf(d1) - K * std::exp(-r*T) * num::fast_normal_cdf(d2);
     }
+    if (T <= 1e-7f) return std::max(0.0f, S - K);
+    if (vol <= 1e-7f) return std::max(0.0f, S * std::exp(-q * T) - K * std::exp(-r * T));
 
-    results[i] = bs_price + premium;
+    float euro_call = S * std::exp(-q * T) * num::fast_normal_cdf(scalar_bs_d1_f(S,K,r,q,vol,T)) - 
+                      K * std::exp(-r * T) * num::fast_normal_cdf(scalar_bs_d1_f(S,K,r,q,vol,T) - vol*std::sqrt(T));
+    
+    float b = r - q;
+    float M = 2.0f * r / (vol*vol);
+    float N_baw = 2.0f * b / (vol*vol);
+
+    float q1_num = -(N_baw - 1.0f) - std::sqrt( (N_baw - 1.0f)*(N_baw - 1.0f) + 4.0f*M);
+    float q1 = 0.5f * q1_num;
+
+    if (q1 >= -1e-7f || std::abs(q1-1.0f) < 1e-7f) {
+        return std::max(euro_call, S-K);
+    }
+    
+    float S_star = K * q1 / (q1 - 1.0f);
+
+    if (S >= S_star) {
+        return S - K;
+    } else {
+        float d1_S_star = scalar_bs_d1_f(S, S_star, r, q, vol, T);
+        float A1 = -(S_star / q1) * (1.0f - std::exp((b - r) * T) * num::fast_normal_cdf(d1_S_star));
+        float premium_val = euro_call + A1 * std::pow(S / S_star, q1);
+        return std::max(premium_val, S-K);
+    }
+}
+
+
+void VectorSingle::AmericanPut(const float *S_arr, const float *K_arr,
+                               const float *r_arr, const float *q_arr,
+                               const float *vol_arr, const float *T_arr,
+                               float *result_arr, size_t size) {
+  size_t i = 0;
+  const size_t avx2_step = 8;
+
+  for (; i + (avx2_step - 1) < size; i += avx2_step) {
+    __m256 S_vec = SimdOperationSingle::load(S_arr + i);
+    __m256 K_vec = SimdOperationSingle::load(K_arr + i);
+    __m256 r_vec = SimdOperationSingle::load(r_arr + i);
+    __m256 q_vec = SimdOperationSingle::load(q_arr + i);
+    __m256 vol_vec = SimdOperationSingle::load(vol_arr + i);
+    __m256 T_vec = SimdOperationSingle::load(T_arr + i);
+
+    __m256 prices = SimdOperationSingle::AmericanPut(S_vec, K_vec, r_vec,
+                                                     q_vec, vol_vec, T_vec);
+    SimdOperationSingle::store(result_arr + i, prices);
+  }
+  for (; i < size; ++i) {
+      result_arr[i] = scalar_baw_put_approx_f(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
   }
 }
 
-void VectorSingle::AmericanCall(const float *S, const float *K, const float *r,
-                                const float *q, const float *vol,
-                                const float *T, float *results, size_t size) {
-  // Process in steps of 8 (AVX2 single precision)
+void VectorSingle::AmericanCall(const float *S_arr, const float *K_arr,
+                                const float *r_arr, const float *q_arr,
+                                const float *vol_arr, const float *T_arr,
+                                float *result_arr, size_t size) {
   size_t i = 0;
-  for (; i + 7 < size; i += 8) {
-    // Load vectors
-    __m256 S_vec = SimdOperationSingle::load(S + i);
-    __m256 K_vec = SimdOperationSingle::load(K + i);
-    __m256 r_vec = SimdOperationSingle::load(r + i);
-    __m256 q_vec = SimdOperationSingle::load(q + i);
-    __m256 vol_vec = SimdOperationSingle::load(vol + i);
-    __m256 T_vec = SimdOperationSingle::load(T + i);
+  const size_t avx2_step = 8;
 
-    // Calculate option prices
+  for (; i + (avx2_step - 1) < size; i += avx2_step) {
+    __m256 S_vec = SimdOperationSingle::load(S_arr + i);
+    __m256 K_vec = SimdOperationSingle::load(K_arr + i);
+    __m256 r_vec = SimdOperationSingle::load(r_arr + i);
+    __m256 q_vec = SimdOperationSingle::load(q_arr + i);
+    __m256 vol_vec = SimdOperationSingle::load(vol_arr + i);
+    __m256 T_vec = SimdOperationSingle::load(T_arr + i);
+
     __m256 prices = SimdOperationSingle::AmericanCall(S_vec, K_vec, r_vec,
                                                       q_vec, vol_vec, T_vec);
-
-    // Store results
-    SimdOperationSingle::store(results + i, prices);
+    SimdOperationSingle::store(result_arr + i, prices);
   }
-
-  // Handle remaining elements with scalar calculation
   for (; i < size; ++i) {
-    // For zero dividend, American call = European call
-    if (q[i] <= 0.0f) {
-      // European call formula
-      if (vol[i] <= 0.0f || T[i] <= 0.0f) {
-        results[i] = std::max(0.0f, S[i] - K[i]);
-        continue;
-      }
-
-      float d1 = (std::log(S[i] / K[i]) +
-                  (r[i] - q[i] + 0.5f * vol[i] * vol[i]) * T[i]) /
-                 (vol[i] * std::sqrt(T[i]));
-      float d2 = d1 - vol[i] * std::sqrt(T[i]);
-
-      float Nd1 = 0.5f * (1.0f + num::fast_erf(d1 / 1.414213562f));
-      float Nd2 = 0.5f * (1.0f + num::fast_erf(d2 / 1.414213562f));
-
-      results[i] = S[i] * std::exp(-q[i] * T[i]) * Nd1 -
-                   K[i] * std::exp(-r[i] * T[i]) * Nd2;
-    } else {
-      // Calculate the critical price
-      float q1 =
-          0.5f * (-(r[i] - q[i]) / (vol[i] * vol[i]) +
-                  std::sqrt(std::pow((r[i] - q[i]) / (vol[i] * vol[i]), 2.0f) +
-                            8.0f * r[i] / (vol[i] * vol[i])));
-
-      float critical_price = K[i] / (1.0f - 1.0f / q1);
-
-      // Check if early exercise is optimal
-      if (S[i] >= critical_price) {
-        results[i] = S[i] - K[i]; // Intrinsic value
-      } else {
-        // Calculate European price
-        float d1 = (std::log(S[i] / K[i]) +
-                    (r[i] - q[i] + 0.5f * vol[i] * vol[i]) * T[i]) /
-                   (vol[i] * std::sqrt(T[i]));
-        float d2 = d1 - vol[i] * std::sqrt(T[i]);
-
-        float Nd1 = 0.5f * (1.0f + num::fast_erf(d1 / 1.414213562f));
-        float Nd2 = 0.5f * (1.0f + num::fast_erf(d2 / 1.414213562f));
-
-        float euro_price = S[i] * std::exp(-q[i] * T[i]) * Nd1 -
-                           K[i] * std::exp(-r[i] * T[i]) * Nd2;
-
-        // Add early exercise premium
-        float ratio = std::pow(S[i] / critical_price, q1);
-        float premium = (critical_price - K[i]) * (1.0f - ratio);
-
-        results[i] = euro_price + premium;
-      }
-    }
+      result_arr[i] = scalar_baw_call_approx_f(S_arr[i], K_arr[i], r_arr[i], q_arr[i], vol_arr[i], T_arr[i]);
   }
 }
 
-void VectorMath::exp(const double *x, double *result, size_t size) {
-  // Use scalar operations for small data sizes
-  if (!shouldUseSimd(size)) {
-    for (size_t i = 0; i < size; ++i) {
-      result[i] = std::exp(x[i]);
-    }
-    return;
-  }
-
-  // Process in chunks of 4 using SLEEF's AVX2 implementation
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    __m256d vec = _mm256_loadu_pd(x + i);
-    // Use SLEEF's optimized exponential function
-    __m256d res = Sleef_expd4_u10avx2(vec);
-    _mm256_storeu_pd(result + i, res);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    result[i] = std::exp(x[i]);
-  }
-}
-
-void VectorMath::log(const double *x, double *result, size_t size) {
-  // Use scalar operations for small data sizes
-  if (!shouldUseSimd(size)) {
-    for (size_t i = 0; i < size; ++i) {
-      result[i] = std::log(x[i]);
-    }
-    return;
-  }
-
-  // Process in chunks of 4 using SLEEF
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    __m256d vec = _mm256_loadu_pd(x + i);
-    // Use SLEEF's optimized logarithm function
-    __m256d res = Sleef_logd4_u10avx2(vec);
-    _mm256_storeu_pd(result + i, res);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    result[i] = std::log(x[i]);
-  }
-}
-
-void VectorMath::sqrt(const double *x, double *result, size_t size) {
-  // Use scalar operations for small data sizes
-  if (!shouldUseSimd(size)) {
-    for (size_t i = 0; i < size; ++i) {
-      result[i] = std::sqrt(x[i]);
-    }
-    return;
-  }
-
-  // Process in chunks of 4 using AVX2 native sqrt
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    __m256d vec = _mm256_loadu_pd(x + i);
-    __m256d res = _mm256_sqrt_pd(vec);
-    _mm256_storeu_pd(result + i, res);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    result[i] = std::sqrt(x[i]);
-  }
-}
-
-void VectorMath::erf(const double *x, double *result, size_t size) {
-  // Use scalar operations for small data sizes
-  if (!shouldUseSimd(size)) {
-    for (size_t i = 0; i < size; ++i) {
-      result[i] = std::erf(x[i]);
-    }
-    return;
-  }
-
-  // Process in chunks of 4 using SLEEF's native erf function
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    __m256d vec = _mm256_loadu_pd(x + i);
-    __m256d res = Sleef_erfd4_u10avx2(vec);
-    _mm256_storeu_pd(result + i, res);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    result[i] = std::erf(x[i]);
-  }
-}
-
-void VectorMath::normalCDF(const double *x, double *result, size_t size) {
-  // Use scalar operations for small data sizes
-  if (!shouldUseSimd(size)) {
-    for (size_t i = 0; i < size; ++i) {
-      // Choose the most numerically stable formula based on the value of x
-      if (x[i] < -8.0) {
-        // For large negative x, use erfc-based formula
-        result[i] = 0.5 * std::erfc(-x[i] / std::sqrt(2.0));
-      } else if (x[i] > 8.0) {
-        // For large positive x, result is very close to 1
-        result[i] = 1.0 - 0.5 * std::erfc(x[i] / std::sqrt(2.0));
-      } else {
-        // For moderate values, use erf-based formula
-        result[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
-      }
-    }
-    return;
-  }
-
-  // Process in chunks of 4 using SLEEF with appropriate formula
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    __m256d x_vec = _mm256_loadu_pd(x + i);
-
-    // Create masks for extreme values
-    __m256d large_neg_mask =
-        _mm256_cmp_pd(x_vec, _mm256_set1_pd(-8.0), _CMP_LT_OS);
-    __m256d large_pos_mask =
-        _mm256_cmp_pd(x_vec, _mm256_set1_pd(8.0), _CMP_GT_OS);
-
-    // Scale for normal CDF: x/sqrt(2)
-    __m256d scaled_x = _mm256_div_pd(x_vec, _mm256_set1_pd(M_SQRT2));
-
-    // For normal range values (-8 to 8), use erf
-    __m256d erf_scaled = Sleef_erfd4_u10avx2(scaled_x);
-    __m256d one = _mm256_set1_pd(1.0);
-    __m256d half = _mm256_set1_pd(0.5);
-    __m256d normal_result = _mm256_mul_pd(_mm256_add_pd(one, erf_scaled), half);
-
-    // For extreme values, calculate using erfc for better numerical stability
-    __m256d neg_scaled_x = _mm256_sub_pd(_mm256_setzero_pd(), scaled_x);
-
-    // For negative large x: N(x) = 0.5*erfc(-x/sqrt(2))
-    __m256d large_neg_result =
-        _mm256_mul_pd(half, Sleef_erfcd4_u15avx2(neg_scaled_x));
-
-    // For positive large x: N(x) = 1 - 0.5*erfc(x/sqrt(2))
-    __m256d large_pos_result =
-        _mm256_sub_pd(one, _mm256_mul_pd(half, Sleef_erfcd4_u15avx2(scaled_x)));
-
-    // Blend results based on extreme value masks
-    __m256d result_vec = normal_result;
-    result_vec = _mm256_blendv_pd(result_vec, large_neg_result, large_neg_mask);
-    result_vec = _mm256_blendv_pd(result_vec, large_pos_result, large_pos_mask);
-
-    // Store result
-    _mm256_storeu_pd(result + i, result_vec);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    if (x[i] < -8.0) {
-      result[i] = 0.5 * std::erfc(-x[i] / std::sqrt(2.0));
-    } else if (x[i] > 8.0) {
-      result[i] = 1.0 - 0.5 * std::erfc(x[i] / std::sqrt(2.0));
-    } else {
-      result[i] = 0.5 * (1.0 + std::erf(x[i] / std::sqrt(2.0)));
-    }
-  }
-}
-
-void VectorMath::normalPDF(const double *x, double *result, size_t size) {
-  // Normal PDF: (1/sqrt(2π)) * exp(-0.5 * x²)
-  const double INV_SQRT_2PI = 0.3989422804014327; // 1/sqrt(2*PI)
-
-  // Use scalar operations for small data sizes
-  if (!shouldUseSimd(size)) {
-    for (size_t i = 0; i < size; ++i) {
-      result[i] = INV_SQRT_2PI * std::exp(-0.5 * x[i] * x[i]);
-    }
-    return;
-  }
-
-  // Process in chunks of 4 using SLEEF
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    __m256d xvec = _mm256_loadu_pd(x + i);
-
-    // Square the values
-    __m256d x_squared = _mm256_mul_pd(xvec, xvec);
-
-    // Multiply by -0.5
-    __m256d scaled = _mm256_mul_pd(x_squared, _mm256_set1_pd(-0.5));
-
-    // Use SLEEF exp function
-    __m256d exp_term = Sleef_expd4_u10avx2(scaled);
-
-    // Multiply by 1/sqrt(2π)
-    __m256d pdf = _mm256_mul_pd(exp_term, _mm256_set1_pd(INV_SQRT_2PI));
-
-    _mm256_storeu_pd(result + i, pdf);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    result[i] = INV_SQRT_2PI * std::exp(-0.5 * x[i] * x[i]);
-  }
-}
-
-void VectorMath::multiply(const double *a, const double *b, double *result,
-                          size_t size) {
-  // Use scalar operations for small data sizes
-  if (!shouldUseSimd(size)) {
-    for (size_t i = 0; i < size; ++i) {
-      result[i] = a[i] * b[i];
-    }
-    return;
-  }
-
-  // Process in chunks of 4 using AVX2
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    __m256d vec_a = _mm256_loadu_pd(a + i);
-    __m256d vec_b = _mm256_loadu_pd(b + i);
-    __m256d res = _mm256_mul_pd(vec_a, vec_b);
-    _mm256_storeu_pd(result + i, res);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    result[i] = a[i] * b[i];
-  }
-}
-
-void VectorMath::add(const double *a, const double *b, double *result,
-                     size_t size) {
-  // Use scalar operations for small data sizes
-  if (!shouldUseSimd(size)) {
-    for (size_t i = 0; i < size; ++i) {
-      result[i] = a[i] + b[i];
-    }
-    return;
-  }
-
-  // Process in chunks of 4 using AVX2
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    __m256d vec_a = _mm256_loadu_pd(a + i);
-    __m256d vec_b = _mm256_loadu_pd(b + i);
-    __m256d res = _mm256_add_pd(vec_a, vec_b);
-    _mm256_storeu_pd(result + i, res);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    result[i] = a[i] + b[i];
-  }
-}
-
-void VectorMath::subtract(const double *a, const double *b, double *result,
-                          size_t size) {
-  // Use scalar operations for small data sizes
-  if (!shouldUseSimd(size)) {
-    for (size_t i = 0; i < size; ++i) {
-      result[i] = a[i] - b[i];
-    }
-    return;
-  }
-
-  // Process in chunks of 4 using AVX2
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    __m256d vec_a = _mm256_loadu_pd(a + i);
-    __m256d vec_b = _mm256_loadu_pd(b + i);
-    __m256d res = _mm256_sub_pd(vec_a, vec_b);
-    _mm256_storeu_pd(result + i, res);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    result[i] = a[i] - b[i];
-  }
-}
-
-void VectorMath::divide(const double *a, const double *b, double *result,
-                        size_t size) {
-  // Use scalar operations for small data sizes
-  if (!shouldUseSimd(size)) {
-    for (size_t i = 0; i < size; ++i) {
-      result[i] = a[i] / b[i];
-    }
-    return;
-  }
-
-  // Process in chunks of 4 using AVX2
-  size_t i = 0;
-  for (; i + 3 < size; i += 4) {
-    __m256d vec_a = _mm256_loadu_pd(a + i);
-    __m256d vec_b = _mm256_loadu_pd(b + i);
-    __m256d res = _mm256_div_pd(vec_a, vec_b);
-    _mm256_storeu_pd(result + i, res);
-  }
-
-  // Handle remaining elements
-  for (; i < size; ++i) {
-    result[i] = a[i] / b[i];
-  }
-}
 
 } // namespace opt
 } // namespace alo
